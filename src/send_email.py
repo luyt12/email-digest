@@ -79,11 +79,19 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
         lines.append(f"--- 📧 邮件 {i+1} ---")
         lines.append("")
         
-        # Original info
+        # Subject with word/char counts
+        subject = email.get('original_subject', '无主题')
+        eng_words = email.get('english_word_count', 0)
+        ch_chars = email.get('chinese_char_count', 0)
+        lines.append(f"📌 {subject}")
+        if eng_words > 0:
+            lines.append(f"   (英文 {eng_words} words → 中文 {ch_chars} chars)")
+        lines.append("")
+        
+        # Sender and time
         lines.append(f"发件人: {email.get('original_sender', 'Unknown')}")
-        lines.append(f"主题: {email.get('original_subject', '无主题')}")
         lines.append(f"时间: {email.get('original_time', '')}")
-        lines.append(f"使用模型: {email.get('model_used', 'N/A')}")
+        lines.append(f"翻译模型: {email.get('model_used', 'N/A')}")
         lines.append("")
         
         # Body

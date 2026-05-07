@@ -325,7 +325,7 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
         email_content: Dict with subject, body, from, received_at
         
     Returns:
-        Dict with original and translated content
+        Dict with original and translated content, including word/char counts
     """
     # Extract email fields
     sender = email_content.get("from", {})
@@ -341,6 +341,9 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
     # Extract article content from body
     article_content = extract_article_content(body, subject)
     
+    # Count English words in original
+    english_word_count = count_words(article_content) if article_content else 0
+    
     if not article_content:
         # No content to translate
         return {
@@ -352,11 +355,16 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
             "translated_subject": subject,
             "translated_body": "[无正文内容]",
             "model_used": "none",
-            "success": False
+            "success": False,
+            "english_word_count": 0,
+            "chinese_char_count": 0
         }
     
     # Translate the article
     translated, model_used, success = translate_article(article_content)
+    
+    # Count Chinese characters in translation
+    chinese_char_count = len(translated.replace('\n', '').replace(' ', '')) if translated else 0
     
     return {
         "id": email_content.get("id"),
@@ -367,7 +375,9 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
         "translated_subject": subject,
         "translated_body": translated,
         "model_used": model_used,
-        "success": success
+        "success": success,
+        "english_word_count": english_word_count,
+        "chinese_char_count": chinese_char_count
     }
 
 
