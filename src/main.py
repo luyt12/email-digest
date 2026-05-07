@@ -43,13 +43,17 @@ def main():
     messages = fetch_recent_emails(api_key, inbox_id)
     print(f"Found {len(messages)} total messages")
     
-    # DEBUG: Print first 5 subjects
-    print("\n=== Latest 5 email subjects ===")
+    # DEBUG: Print first 5 with full details
+    print("\n=== Latest 5 emails (full info) ===")
     for i, msg in enumerate(messages[:5]):
         subject = msg.get("subject", "No subject")
         received = msg.get("received_at", "")
-        print(f"{i+1}. [{received[:10]}] {subject}")
-    print("=== End of subjects ===\n")
+        direction = msg.get("direction", "N/A")  # Check direction field
+        from_addr = msg.get("from", {})
+        from_str = from_addr.get("email", "") if isinstance(from_addr, dict) else str(from_addr)
+        print(f"{i+1}. [{received[:10]}] [{direction}] From: {from_str}")
+        print(f"   Subject: {subject}")
+    print("=== End of emails ===\n")
     
     # Filter to today's unprocessed emails
     new_emails = []

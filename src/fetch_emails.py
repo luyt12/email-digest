@@ -31,7 +31,7 @@ def fetch_recent_emails(api_key: str, inbox_id: str, limit: int = 50) -> List[Di
     
     params = {
         "limit": limit,
-        "ascending": True  # Oldest first
+        "ascending": False  # Newest first
     }
     
     response = requests.get(url, headers=headers, params=params, timeout=30)
