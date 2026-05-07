@@ -40,20 +40,34 @@ def main():
     
     # Fetch recent emails
     print(f"Fetching emails from inbox: {inbox_id}")
-    messages = fetch_recent_emails(api_key, inbox_id)
-    print(f"Found {len(messages)} total messages")
+    all_messages = fetch_recent_emails(api_key, inbox_id)
+    print(f"Found {len(all_messages)} total messages (inbox + sent)")
     
-    # DEBUG: Print first 5 with full details
-    print("\n=== Latest 5 emails (full info) ===")
+    # Filter to only INCOMING emails (where 'from' is NOT our inbox address)
+    # AgentMail returns both incoming and outgoing messages in the same list
+    messages = []
+    for m in all_messages:
+        from_addr = m.get("from", "")
+        # If from_addr is a dict, extract the email
+        if isinstance(from_addr, dict):
+            from_addr = from_addr.get("email", "")
+        # Skip if this is a sent email (from our own inbox)
+        if from_addr == inbox_id or from_addr == inbox_email:
+            continue
+        messages.append(m)
+    
+    print(f"Found {len(messages)} incoming emails (excluding sent)")
+    
+    # DEBUG: Print first 5 incoming subjects
+    print("\n=== Latest 5 INCOMING email subjects ===")
     for i, msg in enumerate(messages[:5]):
         subject = msg.get("subject", "No subject")
-        received = msg.get("received_at", "")
-        direction = msg.get("direction", "N/A")  # Check direction field
-        from_addr = msg.get("from", {})
-        from_str = from_addr.get("email", "") if isinstance(from_addr, dict) else str(from_addr)
-        print(f"{i+1}. [{received[:10]}] [{direction}] From: {from_str}")
-        print(f"   Subject: {subject}")
-    print("=== End of emails ===\n")
+        sender = msg.get("from", "Unknown")
+        if isinstance(sender, dict):
+            sender = sender.get("email", "Unknown")
+        received = msg.get("timestamp", "")[:19] if msg.get("timestamp") else ""
+        print(f"{i+1}. [{received}] {subject[:60]} (from: {sender[:40]})")
+    print("=== End of subjects ===\n")
     
     # Filter to today's unprocessed emails
     new_emails = []
