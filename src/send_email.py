@@ -40,9 +40,8 @@ def send_digest_email(
     
     # From address - should be inbox email (from INBOX_ID or env)
     if from_email is None:
-        inbox_id = os.environ.get("AGENTMAIL_INBOX_ID", "")
-        # INBOX_ID format: am_us_inbox_xxx -> extract email or construct
-        from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", "excitedsilver931@agentmail.to")
+        inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
+        from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", inbox_email)
     
     # Send via SMTP
     send_email_smtp(
@@ -186,6 +185,6 @@ def send_simple_email(
         from_email: Sender (optional, uses inbox email)
     """
     if from_email is None:
-        from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", "excitedsilver931@agentmail.to")
+        from_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     
     send_email_smtp(from_email, to_email, subject, body)

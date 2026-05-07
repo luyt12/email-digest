@@ -35,8 +35,8 @@ env/
 .env
 .env.local
 
-# Data files (keep in repo for tracking)
-data/processed_emails.json
+# Data files - keeping in repo for tracking processed emails
+# data/processed_emails.json
 
 # Logs
 *.log

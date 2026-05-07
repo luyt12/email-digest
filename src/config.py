@@ -12,7 +12,8 @@ PROCESSED_IDS_FILE = DATA_DIR / "processed_emails.json"
 
 # AgentMail API
 AGENTMAIL_BASE_URL = "https://api.agentmail.to/v0"
-AGENTMAIL_INBOX_ID = os.environ.get("AGENTMAIL_INBOX_ID", "")
+AGENTMAIL_INBOX_EMAIL = "excitedsilver931@agentmail.to"  # 邮箱地址格式
+AGENTMAIL_INBOX_ID = os.environ.get("AGENTMAIL_INBOX_ID", "")  # 旧格式兼容
 AGENTMAIL_API_KEY = os.environ.get("AGENTMAIL_API_KEY", "")
 
 # Target email

@@ -14,12 +14,14 @@ def fetch_recent_emails(api_key: str, inbox_id: str, limit: int = 50) -> List[Di
     
     Args:
         api_key: AgentMail API key
-        inbox_id: The inbox ID to fetch from
+        inbox_id: The inbox email or ID (e.g., 'user@agentmail.to' or 'am_us_inbox_xxx')
         limit: Maximum number of messages to fetch
         
     Returns:
         List of message objects
     """
+    # Support both email format and inbox ID format
+    # Email: user@agentmail.to, ID: am_us_inbox_xxx
     url = f"{AGENTMAIL_BASE_URL}/inboxes/{inbox_id}/messages"
     
     headers = {

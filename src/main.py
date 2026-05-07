@@ -22,7 +22,9 @@ def main():
     
     # Load configuration
     api_key = os.environ.get("AGENTMAIL_API_KEY")
-    inbox_id = os.environ.get("AGENTMAIL_INBOX_ID")
+    # Try inbox email first (new format), fall back to inbox ID (old format)
+    inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
+    inbox_id = os.environ.get("AGENTMAIL_INBOX_ID", inbox_email)
     target_email = os.environ.get("TARGET_EMAIL")
     
     if not all([api_key, inbox_id, target_email]):
@@ -40,6 +42,14 @@ def main():
     print(f"Fetching emails from inbox: {inbox_id}")
     messages = fetch_recent_emails(api_key, inbox_id)
     print(f"Found {len(messages)} total messages")
+    
+    # DEBUG: Print first 5 subjects
+    print("\n=== Latest 5 email subjects ===")
+    for i, msg in enumerate(messages[:5]):
+        subject = msg.get("subject", "No subject")
+        received = msg.get("received_at", "")
+        print(f"{i+1}. [{received[:10]}] {subject}")
+    print("=== End of subjects ===\n")
     
     # Filter to today's unprocessed emails
     new_emails = []
