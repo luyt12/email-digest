@@ -43,20 +43,24 @@ def main():
     all_messages = fetch_recent_emails(api_key, inbox_id)
     print(f"Found {len(all_messages)} total messages (inbox + sent)")
     
-    # Filter to only INCOMING emails (where 'from' is NOT our inbox address)
-    # AgentMail returns both incoming and outgoing messages in the same list
+    # Filter to only INBOUND emails using 'direction' field
+    # AgentMail returns both incoming (inbound) and outgoing (outbound) messages
+    # direction field: 'inbound' = received, 'outbound' = sent
     messages = []
     for m in all_messages:
-        from_addr = m.get("from", "")
-        # If from_addr is a dict, extract the email
-        if isinstance(from_addr, dict):
-            from_addr = from_addr.get("email", "")
-        # Skip if this is a sent email (from our own inbox)
-        if from_addr == inbox_id or from_addr == inbox_email:
-            continue
-        messages.append(m)
+        direction = m.get("direction", "")
+        # Only include inbound emails (received, not sent)
+        if direction == "inbound":
+            messages.append(m)
+        elif not direction:
+            # Fallback: check 'from' address if direction is missing
+            from_addr = m.get("from", "")
+            if isinstance(from_addr, dict):
+                from_addr = from_addr.get("email", "")
+            if from_addr != inbox_id and from_addr != inbox_email:
+                messages.append(m)
     
-    print(f"Found {len(messages)} incoming emails (excluding sent)")
+    print(f"Found {len(messages)} INBOUND emails (direction='inbound')")
     
     # DEBUG: Print first 5 incoming subjects
     print("\n=== Latest 5 INCOMING email subjects ===")

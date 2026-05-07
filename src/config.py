@@ -23,11 +23,13 @@ TARGET_EMAIL = os.environ.get("TARGET_EMAIL", "")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
-# Model chain (in order of preference)
+# Model chain (in order of preference) - NVIDIA API
 MODEL_CHAIN = [
-    "mistralai/mistral-nemo-12b-instruct",  # Primary
-    "qwen/qwen3-8b-instruct",                # Fallback 1
-    "google/gemma-3-4b-it",                   # Fallback 2
+    "minimaxai/minimax-m2.7",                  # Primary
+    "qwen/qwen3-coder-480b-a35b-instruct",    # Fallback 1
+    "stepfun-ai/step-3.5-flash",              # Fallback 2
+    "google/gemma-3n-e2b-it",                 # Fallback 3
+    "mistralai/mistral-nemotron",             # Fallback 4
 ]
 
 # SMTP settings for sending (AgentMail SMTP)
