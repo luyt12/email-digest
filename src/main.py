@@ -113,8 +113,10 @@ def main():
     errors = []
     
     for msg in new_emails:
-        msg_id = msg.get("id")
+        msg_id = msg.get("message_id") or msg.get("id")
         print(f"\nProcessing email: {msg_id}")
+        print(f"  Subject: {msg.get('subject', 'No subject')}")
+        print(f"  From: {msg.get('from', 'Unknown')}")
         
         try:
             # Get full message content
