@@ -45,22 +45,38 @@ def main():
     
     # Filter to only INBOUND emails using 'direction' field
     # AgentMail returns both incoming (inbound) and outgoing (outbound) messages
-    # direction field: 'inbound' = received, 'outbound' = sent
+    # direction field values may be: 'in', 'out', 'inbound', 'outbound', or missing
     messages = []
+    inbound_count = 0
+    outbound_count = 0
+    unknown_count = 0
+    
     for m in all_messages:
         direction = m.get("direction", "")
-        # Only include inbound emails (received, not sent)
-        if direction == "inbound":
-            messages.append(m)
-        elif not direction:
+        
+        # DEBUG: Print direction values to understand API response
+        if direction:
+            if direction in ["in", "inbound"]:
+                inbound_count += 1
+                messages.append(m)
+            elif direction in ["out", "outbound"]:
+                outbound_count += 1
+            else:
+                unknown_count += 1
+                print(f"  Unknown direction value: '{direction}' for message: {m.get('subject', 'No subject')[:30]}")
+        else:
             # Fallback: check 'from' address if direction is missing
             from_addr = m.get("from", "")
             if isinstance(from_addr, dict):
                 from_addr = from_addr.get("email", "")
             if from_addr != inbox_id and from_addr != inbox_email:
                 messages.append(m)
+                unknown_count += 1
+            else:
+                outbound_count += 1
     
-    print(f"Found {len(messages)} INBOUND emails (direction='inbound')")
+    print(f"Direction stats: inbound={inbound_count}, outbound={outbound_count}, unknown={unknown_count}")
+    print(f"Found {len(messages)} INBOUND emails to process")
     
     # DEBUG: Print first 5 incoming subjects
     print("\n=== Latest 5 INCOMING email subjects ===")
