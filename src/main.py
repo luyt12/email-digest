@@ -43,40 +43,31 @@ def main():
     all_messages = fetch_recent_emails(api_key, inbox_id)
     print(f"Found {len(all_messages)} total messages (inbox + sent)")
     
-    # Filter to only INBOUND emails using 'direction' field
-    # AgentMail returns both incoming (inbound) and outgoing (outbound) messages
-    # direction field values may be: 'in', 'out', 'inbound', 'outbound', or missing
+    # Filter out SENT emails (from AgentMail itself)
+    # Emails from "AgentMail <excitedsilver931@agentmail.to>" are outbound/sent emails
+    # Only keep emails from other senders (true inbox emails)
     messages = []
-    inbound_count = 0
-    outbound_count = 0
-    unknown_count = 0
-    
     for m in all_messages:
-        direction = m.get("direction", "")
-        
-        # DEBUG: Print direction values to understand API response
-        if direction:
-            if direction in ["in", "inbound"]:
-                inbound_count += 1
-                messages.append(m)
-            elif direction in ["out", "outbound"]:
-                outbound_count += 1
-            else:
-                unknown_count += 1
-                print(f"  Unknown direction value: '{direction}' for message: {m.get('subject', 'No subject')[:30]}")
+        from_addr = m.get("from", "")
+        if isinstance(from_addr, dict):
+            from_email = from_addr.get("email", "")
+            from_name = from_addr.get("name", "")
         else:
-            # Fallback: check 'from' address if direction is missing
-            from_addr = m.get("from", "")
-            if isinstance(from_addr, dict):
-                from_addr = from_addr.get("email", "")
-            if from_addr != inbox_id and from_addr != inbox_email:
-                messages.append(m)
-                unknown_count += 1
-            else:
-                outbound_count += 1
+            # Parse "Name <email>" format
+            from_email = from_addr
+            from_name = ""
+        
+        # Skip if sender is our own AgentMail address (outbound/sent email)
+        if from_email == inbox_email or from_email == "excitedsilver931@agentmail.to":
+            continue
+        
+        # Also skip if from_addr string contains our email
+        if isinstance(from_addr, str) and inbox_email in from_addr:
+            continue
+        
+        messages.append(m)
     
-    print(f"Direction stats: inbound={inbound_count}, outbound={outbound_count}, unknown={unknown_count}")
-    print(f"Found {len(messages)} INBOUND emails to process")
+    print(f"Found {len(messages)} INBOX emails (excluding sent from AgentMail)")
     
     # DEBUG: Print first 5 incoming subjects
     print("\n=== Latest 5 INCOMING email subjects ===")
