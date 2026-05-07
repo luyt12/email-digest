@@ -4,7 +4,7 @@
 import os
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # Add src to path for imports
@@ -72,15 +72,32 @@ def main():
     # Filter to today's unprocessed emails
     new_emails = []
     for msg in messages:
-        msg_id = msg.get("id")
-        received_at = msg.get("received_at", "")
+        msg_id = msg.get("message_id") or msg.get("id")
+        # AgentMail uses 'timestamp' field, not 'received_at'
+        timestamp = msg.get("timestamp", "")
         
         # Skip already processed
         if msg_id in processed_ids:
             continue
         
-        # Skip if not today's email
-        if not is_today(received_at):
+        # Check if today (using Beijing time for comparison)
+        # The timestamp is in UTC, convert to Beijing time for comparison
+        if timestamp:
+            try:
+                # Parse timestamp (ISO format)
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                # Convert to Beijing time (UTC+8)
+                beijing_tz = timezone(timedelta(hours=8))
+                dt_beijing = dt.astimezone(beijing_tz)
+                now_beijing = datetime.now(beijing_tz)
+                
+                # Check if same day in Beijing time
+                if dt_beijing.date() != now_beijing.date():
+                    continue
+            except Exception as e:
+                print(f"Warning: Could not parse timestamp '{timestamp}': {e}")
+                continue
+        else:
             continue
         
         new_emails.append(msg)
