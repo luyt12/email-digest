@@ -35,6 +35,9 @@ def get_time_window_for_schedule(schedule_index):
     """
     根据时间窗口索引计算时间窗口。
     
+    自动处理跨日补救：如果时间点在当前时间之后，说明是跨日补救，
+    自动回退到前一天。
+    
     Args:
         schedule_index: 0-5，对应 04:40, 08:40, 13:40, 16:40, 19:40, 23:40
         
@@ -46,8 +49,13 @@ def get_time_window_for_schedule(schedule_index):
     
     schedule_hour, schedule_minute = SCHEDULE_TIMES[schedule_index]
     
-    # 结束时间：当前运行时间点（今天）
+    # 结束时间：时间点
     end_time = now_beijing.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
+    
+    # 跨日补救：如果结束时间在当前时间之后，回退一天
+    # 例如：次日 02:40 补救 23:40 → end_time 从次日 23:40 回退到前日 23:40
+    if end_time > now_beijing:
+        end_time -= timedelta(days=1)
     
     # 开始时间：上一个时间点的下一分钟
     if schedule_index == 0:
@@ -103,20 +111,21 @@ def main():
     print(f"[{datetime.now(timezone.utc).isoformat()}] Starting email digest...")
     
     # 检查是否指定了时间窗口索引（用于补救触发）
-    schedule_index = os.environ.get("SCHEDULE_INDEX", "")
+    schedule_index_str = os.environ.get("SCHEDULE_INDEX", "")
     force_schedule = False
+    schedule_index = None
     
-    if schedule_index:
+    if schedule_index_str:
         try:
-            schedule_index = int(schedule_index)
+            schedule_index = int(schedule_index_str)
             if 0 <= schedule_index < len(SCHEDULE_TIMES):
                 force_schedule = True
-                print(f"强制使用时间窗口索引: {schedule_index} ({SCHEDULE_TIMES[schedule_index]})")
+                print(f"强制使用时间窗口索引: {schedule_index} ({SCHEDULE_TIMES[schedule_index][0]:02d}:{SCHEDULE_TIMES[schedule_index][1]:02d})")
             else:
                 print(f"警告: 无效的 SCHEDULE_INDEX={schedule_index}，忽略")
                 schedule_index = None
         except ValueError:
-            print(f"警告: 无法解析 SCHEDULE_INDEX={schedule_index}，忽略")
+            print(f"警告: 无法解析 SCHEDULE_INDEX={schedule_index_str}，忽略")
             schedule_index = None
     
     # Load configuration
