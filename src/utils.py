@@ -12,24 +12,74 @@ from typing import Set, Optional
 from config import PROCESSED_IDS_FILE
 
 
+# 时间窗口过期阈值：保留最近 3 个窗口（约 24 小时）
+# 6 个时间点间隔约 4 小时，3 个窗口 = 12 小时，但取 24 小保安留度更高
+PROCESSED_IDS_TTL_HOURS = 24
+
+def _is_expired(timestamp_str: str) -> bool:
+    """检查时间戳是否已过期（超过 TTL）。"""
+    if not timestamp_str:
+        return True
+    try:
+        ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        elapsed = now - ts.astimezone(timezone.utc)
+        return elapsed > timedelta(hours=PROCESSED_IDS_TTL_HOURS)
+    except (ValueError, AttributeError):
+        return True  # 无法解析视为过期
+
+
 def load_processed_ids() -> Set[str]:
-    """Load processed email IDs from file."""
+    """Load processed email IDs from file, filtering out expired entries."""
     if not PROCESSED_IDS_FILE.exists():
         return set()
-    
+
     try:
         with open(PROCESSED_IDS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return set(data.get("processed_ids", []))
+
+        # Support both old format (list) and new format (dict)
+        raw = data.get("processed_ids", {})
+        if isinstance(raw, list):
+            # Old format: just IDs, no timestamps — treat all as expired (clear it)
+            print(f"  [dedup] 发现旧格式 processed_ids，共 {len(raw)} 条，已清除")
+            return set()
+        elif isinstance(raw, dict):
+            # New format: {id: timestamp}
+            expired = [mid for mid, ts in raw.items() if _is_expired(ts)]
+            valid = {mid: ts for mid, ts in raw.items() if not _is_expired(ts)}
+            if expired:
+                print(f"  [dedup] 过滤掉 {len(expired)} 条过期记录，保留 {len(valid)} 条有效记录")
+            return set(valid.keys())
+        return set()
     except (json.JSONDecodeError, IOError) as e:
         print(f"Warning: Could not load processed IDs: {e}")
         return set()
 
 
 def save_processed_ids(ids: Set[str]):
-    """Save processed email IDs to file."""
+    """Save processed email IDs to file with timestamps (auto-expires after TTL)."""
     PROCESSED_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
+
+    now_utc = datetime.now(timezone.utc)
+    new_timestamp = now_utc.isoformat()
+
+    # Load existing (may contain unexpired entries from previous runs)
+    existing_ids: dict = {}
+    if PROCESSED_IDS_FILE.exists():
+        try:
+            with open(PROCESSED_IDS_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f).get("processed_ids", {})
+            if isinstance(raw, dict):
+                # Filter out expired entries before merging
+                existing_ids = {mid: ts for mid, ts in raw.items() if not _is_expired(ts)}
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # Merge: keep existing unexpired + new ids with current timestamp
+    for mid in ids:
+        existing_ids[mid] = new_timestamp
+
     existing = {}
     if PROCESSED_IDS_FILE.exists():
         try:
@@ -37,10 +87,10 @@ def save_processed_ids(ids: Set[str]):
                 existing = json.load(f)
         except (json.JSONDecodeError, IOError):
             pass
-    
-    existing["processed_ids"] = list(ids)
-    existing["last_updated"] = datetime.now(timezone.utc).isoformat()
-    
+
+    existing["processed_ids"] = existing_ids
+    existing["last_updated"] = now_utc.isoformat()
+
     with open(PROCESSED_IDS_FILE, "w", encoding="utf-8") as f:
         json.dump(existing, f, ensure_ascii=False, indent=2)
 
