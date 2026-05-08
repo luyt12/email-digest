@@ -59,8 +59,6 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     - 翻译内容
     - 字数统计和模型信息
     """
-    import re
-
     lines = []
 
     # 原文信息（无边框）
