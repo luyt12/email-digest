@@ -1,0 +1,117 @@
+name: Test OpenRouter Translation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install requests
+        run: pip install requests
+      
+      - name: Test OpenRouter Free Translation
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python3 << 'EOF'
+          import os
+          import requests
+          import json
+          import time
+
+          api_key = os.environ.get('OPENROUTER_API_KEY')
+          if not api_key:
+              print("❌ 错误: OPENROUTER_API_KEY 未设置")
+              exit(1)
+
+          print(f"✅ API Key 已加载 (前10字符: {api_key[:10]}...)")
+
+          # 测试文章
+          test_article = {
+              "title": "China's Long Arm in Lusaka: A New Era of African Relations",
+              "content": """Zambia has become a focal point for China's expanding influence in Africa. The southern African nation, rich in copper and other minerals, has seen significant Chinese investment over the past two decades.
+
+          Chinese companies now control large portions of Zambia's mining sector, creating both economic opportunities and local tensions. The influx of Chinese workers and businesses has transformed parts of Lusaka, the capital city.
+
+          Critics argue that China's "debt-trap diplomacy" has left Zambia in a precarious financial situation."""
+          }
+
+          print(f"\n📝 原文标题: {test_article['title']}")
+          print(f"📝 原文长度: {len(test_article['content'])} 字符")
+
+          # 调用 OpenRouter API
+          url = "https://openrouter.ai/api/v1/chat/completions"
+          headers = {
+              "Authorization": f"Bearer {api_key}",
+              "Content-Type": "application/json",
+              "HTTP-Referer": "https://github.com/luyt12/email-digest",
+              "X-Title": "Translation Test"
+          }
+
+          system_prompt = """你是专业翻译，将英文文章翻译成中文。
+          规则：
+          1. 使用自然流畅的中文
+          2. 专有名词首次出现时保留英文并在括号中给出中文翻译
+          3. 保持原文结构和段落
+          4. 不要添加任何解释"""
+
+          user_prompt = f"""翻译这篇文章：
+
+          标题: {test_article['title']}
+
+          内容:
+          {test_article['content']}"""
+
+          payload = {
+              "model": "openrouter/free",
+              "messages": [
+                  {"role": "system", "content": system_prompt},
+                  {"role": "user", "content": user_prompt}
+              ],
+              "max_tokens": 2048,
+              "temperature": 0.3
+          }
+
+          print("\n⏳ 正在翻译...")
+          start_time = time.time()
+
+          try:
+              response = requests.post(url, headers=headers, json=payload, timeout=60)
+              elapsed = time.time() - start_time
+
+              if response.status_code != 200:
+                  print(f"❌ API 错误 {response.status_code}: {response.text}")
+                  exit(1)
+
+              result = response.json()
+              content = result['choices'][0]['message']['content']
+
+              print(f"\n{'='*50}")
+              print("✅ 翻译结果:")
+              print('='*50)
+              print(content)
+              print('='*50)
+              print(f"\n📊 统计:")
+              print(f"   耗时: {elapsed:.1f}s")
+              print(f"   模型: {result.get('model', 'N/A')}")
+              print(f"   输入tokens: {result.get('usage', {}).get('prompt_tokens', 'N/A')}")
+              print(f"   输出tokens: {result.get('usage', {}).get('completion_tokens', 'N/A')}")
+              print(f"   翻译长度: {len(content)} 字符")
+
+              if len(content) > 50 and elapsed < 60:
+                  print("\n✅ 测试通过: openrouter/free 模型可用")
+              else:
+                  print("\n⚠️ 警告: 翻译可能不完整")
+
+          except Exception as e:
+              print(f"❌ 翻译失败: {e}")
+              exit(1)
+          EOF
