@@ -70,8 +70,19 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
 
     lines.append("📧 原文信息")
     lines.append(f"📌 标题：{cleaned_title}")
-    lines.append(f"👤 发件人：{translated_email.get('original_sender', 'Unknown')}")
-    lines.append(f"🕐 时间：{translated_email.get('original_time', '')}")
+    # 时间转为北京时间
+    original_time = translated_email.get('original_time', '')
+    beijing_time = ''
+    if original_time:
+        from datetime import datetime, timezone, timedelta
+        beijing_tz = timezone(timedelta(hours=8))
+        try:
+            # Parse ISO format time
+            dt = datetime.fromisoformat(original_time.replace('Z', '+00:00'))
+            beijing_time = dt.astimezone(beijing_tz).strftime('%Y-%m-%d %H:%M 北京时间')
+        except:
+            beijing_time = original_time
+    lines.append(f"🕐 时间：{beijing_time}")
     lines.append("")
 
     # 字数统计
