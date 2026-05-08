@@ -53,24 +53,27 @@ def send_single_email(
 def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     """
     构建单封邮件的内容。
-    
-    格式美化版，包含：
+
+    格式包含：
     - 原文信息（标题、发件人、时间）
     - 翻译内容
     - 字数统计和模型信息
     """
+    import re
+
     lines = []
-    
-    # 原文信息
-    lines.append("╔══════════════════════════════════════════════════════════════")
-    lines.append("║  📧 原文信息")
-    lines.append("╚══════════════════════════════════════════════════════════════")
-    lines.append("")
-    lines.append(f"📌 标题：{translated_email.get('original_subject', '无主题')}")
+
+    # 原文信息（无边框）
+    original_subject = translated_email.get('original_subject', '无主题')
+    # 去除冒号前的前缀（如 "来源名: " → 只保留冒号后的标题）
+    cleaned_title = re.sub(r'^[^：:]+[：:]s*', '', original_subject).strip() or original_subject
+
+    lines.append("📧 原文信息")
+    lines.append(f"📌 标题：{cleaned_title}")
     lines.append(f"👤 发件人：{translated_email.get('original_sender', 'Unknown')}")
     lines.append(f"🕐 时间：{translated_email.get('original_time', '')}")
     lines.append("")
-    
+
     # 字数统计
     eng_words = translated_email.get('english_word_count', 0)
     ch_chars = translated_email.get('chinese_char_count', 0)
@@ -78,25 +81,23 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
         lines.append(f"📊 统计：英文 {eng_words} words → 中文 {ch_chars} chars")
     lines.append(f"🤖 翻译模型：{translated_email.get('model_used', 'N/A')}")
     lines.append("")
-    
+
     # 翻译内容
-    lines.append("╔══════════════════════════════════════════════════════════════")
-    lines.append("║  📝 翻译内容")
-    lines.append("╚══════════════════════════════════════════════════════════════")
+    lines.append("📝 翻译内容")
     lines.append("")
     lines.append(translated_email.get("translated_body", "[无内容]"))
     lines.append("")
-    
+
     # 状态
     if translated_email.get("success"):
         lines.append("✅ 翻译成功")
     else:
         lines.append("⚠️ 翻译失败")
-    
+
     lines.append("")
     lines.append("─" * 60)
     lines.append("由 Email Digest 自动发送")
-    
+
     return "\n".join(lines)
 
 
