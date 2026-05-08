@@ -66,7 +66,7 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     # 原文信息（无边框）
     original_subject = translated_email.get('original_subject', '无主题')
     # 去除冒号前的前缀（如 "来源名: " → 只保留冒号后的标题）
-    cleaned_title = re.sub(r'^[^：:]+[：:]s*', '', original_subject).strip() or original_subject
+    cleaned_title = re.sub(r'^[^：:]+[：:]\s*', '', original_subject).strip() or original_subject
 
     lines.append("📧 原文信息")
     lines.append(f"📌 标题：{cleaned_title}")
