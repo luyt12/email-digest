@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from fetch_emails import fetch_recent_emails, get_message_content
 from summarize import translate_email
 from send_email import send_single_email
-from utils import load_processed_ids, save_processed_ids, load_last_run_time, save_last_run_time
+from utils import load_processed_ids, save_processed_ids
 
 
 # 运行时间点配置（北京时间）
@@ -41,6 +41,7 @@ def get_time_window():
     - 08:40 运行 → 抓取 4:41 ~ 08:40
     - 13:40 运行 → 抓取 8:41 ~ 13:40
     - ...
+    - 手动触发（不在时间点）→ 抓取最近 4 小时
     """
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
@@ -61,27 +62,28 @@ def get_time_window():
             matched_schedule = i
             break
     
-    if matched_schedule is None:
-        # 没有匹配的时间点，可能是手动触发
-        # 使用最近的一个时间点
-        print(f"Warning: No matching schedule time found, using default window")
-        matched_schedule = 0
-    
     # 计算时间窗口
-    schedule_hour, schedule_minute = SCHEDULE_TIMES[matched_schedule]
-    
-    # 结束时间：当前运行时间点
-    end_time = now_beijing.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
-    
-    # 开始时间：上一个时间点的下一分钟
-    if matched_schedule == 0:
-        # 第一个时间点 (04:40)，上一个时间点是 23:40（前一天）
-        # 但对于 04:40，我们从当天 0:00 开始
-        start_time = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    if matched_schedule is not None:
+        # 定时触发：使用正常的时间窗口
+        schedule_hour, schedule_minute = SCHEDULE_TIMES[matched_schedule]
+        
+        # 结束时间：当前运行时间点
+        end_time = now_beijing.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
+        
+        # 开始时间：上一个时间点的下一分钟
+        if matched_schedule == 0:
+            # 第一个时间点 (04:40)，上一个时间点是 23:40（前一天）
+            # 但对于 04:40，我们从当天 0:00 开始
+            start_time = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            # 其他时间点
+            prev_hour, prev_minute = SCHEDULE_TIMES[matched_schedule - 1]
+            start_time = end_time.replace(hour=prev_hour, minute=prev_minute + 1, second=0, microsecond=0)
     else:
-        # 其他时间点
-        prev_hour, prev_minute = SCHEDULE_TIMES[matched_schedule - 1]
-        start_time = end_time.replace(hour=prev_hour, minute=prev_minute + 1, second=0, microsecond=0)
+        # 手动触发：抓取最近 4 小时的邮件
+        end_time = now_beijing
+        start_time = end_time - timedelta(hours=4)
+        print("手动触发模式：抓取最近 4 小时的邮件")
     
     return start_time, end_time
 
@@ -142,7 +144,7 @@ def main():
     
     for msg in messages:
         msg_id = msg.get("message_id") or msg.get("id")
-        timestamp = msg.get("timestamp", "")
+        timestamp = msg.get("timestamp", "") or msg.get("received_at", "") or msg.get("created_at", "")
         
         # Skip already processed
         if msg_id in processed_ids:
