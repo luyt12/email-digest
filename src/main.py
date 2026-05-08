@@ -237,7 +237,8 @@ def main():
             sender_name = SENDER_PREFIX_RE.sub('', sender_name).strip()
             article_title = SENDER_PREFIX_RE.sub('', article_title).strip()
             
-            email_subject = f"{sender_name} - {article_title}"
+            # 如果 sender_name 为空，直接用 article_title
+            email_subject = f"{sender_name} - {article_title}" if sender_name else article_title
             
             print(f"\n发送邮件: {email_subject}")
             send_single_email(target_email, translated, email_subject)
