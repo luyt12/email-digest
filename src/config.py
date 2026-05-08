@@ -35,7 +35,7 @@ MODEL_CHAIN = [
     "stepfun-ai/step-3.5-flash",              # Fallback 2 (NVIDIA)
     "google/gemma-3n-e2b-it",                 # Fallback 3 (NVIDIA)
     "mistralai/mistral-nemotron",             # Fallback 4 (NVIDIA)
-    "openrouter/auto",                        # OpenRouter auto-select (备选)
+    "openrouter/free",                        # OpenRouter free tier (备选)
 ]
 
 # SMTP settings for sending (AgentMail SMTP)
