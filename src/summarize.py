@@ -16,7 +16,12 @@ import requests
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 
-from config import NVIDIA_API_URL, NVIDIA_API_KEY, MODEL_CHAIN, LLM_TIMEOUT, LLM_MAX_TOKENS
+from config import (
+    NVIDIA_API_URL, NVIDIA_API_KEY,
+    OPENROUTER_API_URL, OPENROUTER_API_KEY,
+    MODEL_CHAIN, LLM_TIMEOUT, LLM_MAX_TOKENS,
+    get_api_url_for_model, get_api_key_for_model
+)
 
 
 # Summary translation prompt (80% compression ratio)
@@ -186,18 +191,15 @@ def extract_article_content(body: str, subject: str = "") -> str:
 def translate_part_with_model(
     content: str, 
     model: str, 
-    api_key: str, 
-    api_url: str,
     word_count: int
 ) -> str:
     """
     Translate a single part with a specific model.
+    Automatically selects the correct API endpoint based on model provider.
     
     Args:
         content: Text content to translate
-        model: Model name
-        api_key: API key
-        api_url: API endpoint
+        model: Model name (e.g., "nvidia/minimaxai/minimax-m2.7" or "openrouter/auto")
         word_count: Word count for prompt
         
     Returns:
@@ -208,10 +210,22 @@ def translate_part_with_model(
         content=content
     )
     
+    # Get the correct API URL and key based on model provider
+    api_url = get_api_url_for_model(model)
+    api_key = get_api_key_for_model(model)
+    
+    if not api_key:
+        raise Exception(f"No API key configured for model {model}")
+    
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
+    
+    # OpenRouter requires HTTP-Referer header
+    if "openrouter" in api_url:
+        headers["HTTP-Referer"] = "https://github.com/luyt12/email-digest"
+        headers["X-Title"] = "Email Digest"
     
     # Estimate max_tokens: Chinese chars ≈ English words × 80%
     # But we need more tokens for the response
@@ -288,13 +302,7 @@ def translate_article(content: str) -> Tuple[str, str, bool]:
         
         for model in models_to_try:
             try:
-                translated = translate_part_with_model(
-                    part,
-                    model,
-                    NVIDIA_API_KEY,
-                    NVIDIA_API_URL,
-                    part_words
-                )
+                translated = translate_part_with_model(part, model, part_words)
                 if not successful_model:
                     successful_model = model
                 print(f"      ✓ Model {model} succeeded")
