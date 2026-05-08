@@ -16,6 +16,12 @@ on:
     # 北京时间 23:40 = UTC 15:40
     - cron: '40 15 * * *'
   workflow_dispatch:
+    inputs:
+      schedule_index:
+        description: '时间窗口索引 (0-5: 04:40, 08:40, 13:40, 16:40, 19:40, 23:40)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   digest:
@@ -39,6 +45,7 @@ jobs:
           AGENTMAIL_INBOX_ID: ${{ secrets.AGENTMAIL_INBOX_ID }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
+          SCHEDULE_INDEX: ${{ github.event.inputs.schedule_index }}
         run: python -m src.main
         
       - name: Upload processed IDs
