@@ -2,23 +2,16 @@ name: Email Digest
 
 on:
   schedule:
-    # 每天 6 次：04:40, 08:40, 13:40, 16:40, 19:40, 23:40 北京时间
-    # 北京时间 04:40 = UTC 20:40 (前一天)
     - cron: '40 20 * * *'
-    # 北京时间 08:40 = UTC 00:40
     - cron: '40 0 * * *'
-    # 北京时间 13:40 = UTC 05:40
     - cron: '40 5 * * *'
-    # 北京时间 16:40 = UTC 08:40
     - cron: '40 8 * * *'
-    # 北京时间 19:40 = UTC 11:40
     - cron: '40 11 * * *'
-    # 北京时间 23:40 = UTC 15:40
     - cron: '40 15 * * *'
   workflow_dispatch:
     inputs:
       schedule_index:
-        description: '时间窗口索引 (0-5: 04:40, 08:40, 13:40, 16:40, 19:40, 23:40)'
+        description: '鏃堕棿绐楀彛绱㈠紩 (0-5)'
         required: false
         default: ''
         type: string
@@ -29,26 +22,42 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
+      - name: Restore processed emails cache
+        uses: actions/cache/restore@v4
+        id: cache-restore
+        with:
+          path: data/processed_emails.json
+          key: processed-emails-${{ github.run_number }}
+          restore-keys: |
+            processed-emails-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          
+
       - name: Fetch, translate and send emails
         env:
           AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
           AGENTMAIL_INBOX_ID: ${{ secrets.AGENTMAIL_INBOX_ID }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
           SCHEDULE_INDEX: ${{ github.event.inputs.schedule_index }}
         run: python -m src.main
-        
-      - name: Upload processed IDs
+
+      - name: Save processed emails cache
+        uses: actions/cache/save@v4
+        with:
+          path: data/processed_emails.json
+          key: processed-emails-${{ github.run_number }}
+
+      - name: Upload processed IDs (backup)
         uses: actions/upload-artifact@v4
         with:
           name: processed-emails
