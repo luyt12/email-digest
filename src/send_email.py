@@ -4,6 +4,7 @@
 修改版：支持单封邮件发送，标题为"来源名 + 文章标题"
 """
 
+import re
 import smtplib
 import os
 from email.mime.text import MIMEText
