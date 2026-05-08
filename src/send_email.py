@@ -1,16 +1,103 @@
 #!/usr/bin/env python3
-"""Send email via SMTP (AgentMail SMTP)."""
+"""Send email via SMTP (AgentMail SMTP).
+
+修改版：支持单封邮件发送，标题为"来源名 + 文章标题"
+"""
 
 import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 from config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
+
+
+def send_single_email(
+    target_email: str,
+    translated_email: Dict[str, Any],
+    subject: str = None
+):
+    """
+    发送单封翻译后的邮件。
+    
+    Args:
+        target_email: 收件人邮箱
+        translated_email: 翻译后的邮件内容
+        subject: 邮件标题（可选，默认使用"来源名 - 文章标题"）
+    """
+    # 构建邮件内容
+    body = build_single_email_body(translated_email)
+    
+    # 邮件标题
+    if subject is None:
+        sender = translated_email.get("original_sender", "Unknown")
+        article_title = translated_email.get("original_subject", "无主题")
+        subject = f"{sender} - {article_title}"
+    
+    # From address
+    inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
+    from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", inbox_email)
+    
+    # Send via SMTP
+    send_email_smtp(
+        from_email=from_email,
+        to_email=target_email,
+        subject=subject,
+        body=body,
+        is_html=False
+    )
+
+
+def build_single_email_body(translated_email: Dict[str, Any]) -> str:
+    """
+    构建单封邮件的内容。
+    
+    格式美化版，包含：
+    - 原文信息（标题、发件人、时间）
+    - 翻译内容
+    - 字数统计和模型信息
+    """
+    lines = []
+    
+    # 原文信息
+    lines.append("╔══════════════════════════════════════════════════════════════")
+    lines.append("║  📧 原文信息")
+    lines.append("╚══════════════════════════════════════════════════════════════")
+    lines.append("")
+    lines.append(f"📌 标题：{translated_email.get('original_subject', '无主题')}")
+    lines.append(f"👤 发件人：{translated_email.get('original_sender', 'Unknown')}")
+    lines.append(f"🕐 时间：{translated_email.get('original_time', '')}")
+    lines.append("")
+    
+    # 字数统计
+    eng_words = translated_email.get('english_word_count', 0)
+    ch_chars = translated_email.get('chinese_char_count', 0)
+    if eng_words > 0:
+        lines.append(f"📊 统计：英文 {eng_words} words → 中文 {ch_chars} chars")
+    lines.append(f"🤖 翻译模型：{translated_email.get('model_used', 'N/A')}")
+    lines.append("")
+    
+    # 翻译内容
+    lines.append("╔══════════════════════════════════════════════════════════════")
+    lines.append("║  📝 翻译内容")
+    lines.append("╚══════════════════════════════════════════════════════════════")
+    lines.append("")
+    lines.append(translated_email.get("translated_body", "[无内容]"))
+    lines.append("")
+    
+    # 状态
+    if translated_email.get("success"):
+        lines.append("✅ 翻译成功")
+    else:
+        lines.append("⚠️ 翻译失败")
+    
+    lines.append("")
+    lines.append("─" * 60)
+    lines.append("由 Email Digest 自动发送")
+    
+    return "\n".join(lines)
 
 
 def send_digest_email(
@@ -22,11 +109,7 @@ def send_digest_email(
     """
     Send a digest email with translated content.
     
-    Args:
-        target_email: Recipient email address
-        translated_emails: List of translated email dicts
-        errors: Optional list of error messages to include
-        from_email: Sender email (optional, uses inbox email if not provided)
+    (保留用于兼容性，但现在主要使用 send_single_email)
     """
     if errors is None:
         errors = []
@@ -38,7 +121,7 @@ def send_digest_email(
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     subject = f"[邮件摘要] {today} - {len(translated_emails)} 封邮件"
     
-    # From address - should be inbox email (from INBOX_ID or env)
+    # From address
     if from_email is None:
         inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
         from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", inbox_email)
@@ -54,19 +137,9 @@ def send_digest_email(
 
 
 def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str] = None) -> str:
-    """
-    Build the digest email body from translated emails.
-    
-    Args:
-        translated_emails: List of translated email dicts
-        errors: Optional list of errors
-        
-    Returns:
-        Plain text body
-    """
+    """Build the digest email body from translated emails."""
     lines = []
     
-    # Header
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines.append(f"📧 邮件摘要 - {today}")
     lines.append(f"共 {len(translated_emails)} 封邮件")
@@ -74,12 +147,10 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
     lines.append("=" * 60)
     lines.append("")
     
-    # Each email
     for i, email in enumerate(translated_emails):
         lines.append(f"--- 📧 邮件 {i+1} ---")
         lines.append("")
         
-        # Subject with word/char counts
         subject = email.get('original_subject', '无主题')
         eng_words = email.get('english_word_count', 0)
         ch_chars = email.get('chinese_char_count', 0)
@@ -88,19 +159,16 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
             lines.append(f"   (英文 {eng_words} words → 中文 {ch_chars} chars)")
         lines.append("")
         
-        # Sender and time
         lines.append(f"发件人: {email.get('original_sender', 'Unknown')}")
         lines.append(f"时间: {email.get('original_time', '')}")
         lines.append(f"翻译模型: {email.get('model_used', 'N/A')}")
         lines.append("")
         
-        # Body
         body = email.get("translated_body", "")
         lines.append("翻译内容:")
         lines.append(body)
         lines.append("")
         
-        # Status indicator
         if email.get("success"):
             lines.append("✅ 翻译成功")
         else:
@@ -110,7 +178,6 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
         lines.append("-" * 40)
         lines.append("")
     
-    # Errors section
     if errors:
         lines.append("")
         lines.append("⚠️ 处理错误:")
@@ -118,7 +185,6 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
             lines.append(f"  - {error}")
         lines.append("")
     
-    # Footer
     lines.append("")
     lines.append("=" * 60)
     lines.append("由 Email Digest GitHub Actions 自动发送")
@@ -137,33 +203,17 @@ def send_email_smtp(
     smtp_user: str = None,
     smtp_password: str = None
 ):
-    """
-    Send an email via SMTP.
-    
-    Args:
-        from_email: Sender email address
-        to_email: Recipient email address
-        subject: Email subject
-        body: Email body
-        is_html: Whether body is HTML
-        smtp_host: SMTP server host
-        smtp_port: SMTP server port
-        smtp_user: SMTP username
-        smtp_password: SMTP password
-    """
-    # Use config defaults if not provided
+    """Send an email via SMTP."""
     smtp_host = smtp_host or SMTP_HOST
     smtp_port = smtp_port or SMTP_PORT
     smtp_user = smtp_user or SMTP_USER
     smtp_password = smtp_password or SMTP_PASSWORD
     
-    # Create message
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = from_email
     msg["To"] = to_email
     
-    # Attach body
     if is_html:
         part = MIMEText(body, "html", "utf-8")
     else:
@@ -171,7 +221,6 @@ def send_email_smtp(
     
     msg.attach(part)
     
-    # Send via SMTP_SSL
     with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
         server.login(smtp_user, smtp_password)
         server.send_message(msg)
@@ -183,15 +232,7 @@ def send_simple_email(
     body: str,
     from_email: str = None
 ):
-    """
-    Send a simple text email.
-    
-    Args:
-        to_email: Recipient
-        subject: Subject
-        body: Body text
-        from_email: Sender (optional, uses inbox email)
-    """
+    """Send a simple text email."""
     if from_email is None:
         from_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     
