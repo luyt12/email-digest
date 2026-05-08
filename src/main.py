@@ -233,7 +233,7 @@ def main():
             article_title = msg.get("subject", "无主题")
             
             # 去除 Blogtrottr 等 RSS 转发服务的前缀（如 "Blogtrottr - " 或 "Blogtrottr: "）
-            SENDER_PREFIX_RE = re.compile(r'^(Blogtrottr\s*[-–—:]\s*)+', re.IGNORECASE)
+            SENDER_PREFIX_RE = re.compile(r'^Blogtrottr(\s*[-–—:]\s*)?', re.IGNORECASE)
             sender_name = SENDER_PREFIX_RE.sub('', sender_name).strip()
             article_title = SENDER_PREFIX_RE.sub('', article_title).strip()
             
