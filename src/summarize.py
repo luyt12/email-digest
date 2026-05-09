@@ -256,15 +256,20 @@ def translate_part_with_model(
     data = response.json()
     
     # Extract response
+    result = None
     if "choices" in data:
         choices = data["choices"]
         if choices and len(choices) > 0:
-            return choices[0].get("message", {}).get("content", "")
+            result = choices[0].get("message", {}).get("content", "")
     
-    if "output" in data:
-        return data["output"]
+    if not result and "output" in data:
+        result = data["output"]
     
-    raise Exception(f"Unexpected response format: {list(data.keys())}")
+    # Check if result is empty - trigger fallback to next model
+    if not result or not result.strip():
+        raise Exception(f"API returned empty content for model {model}")
+    
+    return result
 
 
 def translate_article(content: str) -> Tuple[str, str, bool]:
@@ -413,3 +418,4 @@ def translate_emails_batch(emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             time.sleep(2)
     
     return results
+
