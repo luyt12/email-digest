@@ -67,7 +67,7 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     # 去除冒号前的前缀（如 "来源名: " → 只保留冒号后的标题）
     cleaned_title = re.sub(r'^[^：:]+[：:]\s*', '', original_subject).strip() or original_subject
 
-    lines.append("📧 原文信息")
+    # 直接显示标题，去掉"原文信息"行
     lines.append(f"📌 标题：{cleaned_title}")
     # 时间转为北京时间
     original_time = translated_email.get('original_time', '')
@@ -248,3 +248,4 @@ def send_simple_email(
         from_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     
     send_email_smtp(from_email, to_email, subject, body)
+
