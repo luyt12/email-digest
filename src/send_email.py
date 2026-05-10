@@ -2,6 +2,7 @@
 """Send email via SMTP (AgentMail SMTP).
 
 修改版：支持单封邮件发送，标题为"来源名 + 文章标题"
+支持显示多段翻译实际使用的所有模型
 """
 
 import re
@@ -9,7 +10,7 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
 
 from config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
@@ -22,26 +23,17 @@ def send_single_email(
 ):
     """
     发送单封翻译后的邮件。
-    
-    Args:
-        target_email: 收件人邮箱
-        translated_email: 翻译后的邮件内容
-        subject: 邮件标题（可选，默认使用"来源名 - 文章标题"）
     """
-    # 构建邮件内容
     body = build_single_email_body(translated_email)
     
-    # 邮件标题
     if subject is None:
         sender = translated_email.get("original_sender", "Unknown")
         article_title = translated_email.get("original_subject", "无主题")
         subject = f"{sender} - {article_title}"
     
-    # From address
     inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", inbox_email)
     
-    # Send via SMTP
     send_email_smtp(
         from_email=from_email,
         to_email=target_email,
@@ -54,29 +46,24 @@ def send_single_email(
 def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     """
     构建单封邮件的内容。
-
+    
     格式包含：
     - 原文信息（标题、发件人、时间）
     - 翻译内容
-    - 字数统计和模型信息
+    - 字数统计和模型信息（显示所有实际使用的模型）
     """
     lines = []
 
-    # 原文信息（无边框）
     original_subject = translated_email.get('original_subject', '无主题')
-    # 去除冒号前的前缀（如 "来源名: " → 只保留冒号后的标题）
     cleaned_title = re.sub(r'^[^：:]+[：:]\s*', '', original_subject).strip() or original_subject
 
-    # 直接显示标题，去掉"原文信息"行
     lines.append(f"📌 标题：{cleaned_title}")
-    # 时间转为北京时间
+    
     original_time = translated_email.get('original_time', '')
     beijing_time = ''
     if original_time:
-        from datetime import datetime, timezone, timedelta
         beijing_tz = timezone(timedelta(hours=8))
         try:
-            # Parse ISO format time
             dt = datetime.fromisoformat(original_time.replace('Z', '+00:00'))
             beijing_time = dt.astimezone(beijing_tz).strftime('%Y-%m-%d %H:%M 北京时间')
         except:
@@ -84,21 +71,30 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     lines.append(f"🕐 时间：{beijing_time}")
     lines.append("")
 
-    # 字数统计
     eng_words = translated_email.get('english_word_count', 0)
     ch_chars = translated_email.get('chinese_char_count', 0)
     if eng_words > 0:
         lines.append(f"📊 统计：英文 {eng_words} words → 中文 {ch_chars} chars")
-    lines.append(f"🤖 翻译模型：{translated_email.get('model_used', 'N/A')}")
+    
+    # 显示实际使用的所有模型
+    models_used = translated_email.get('models_used', translated_email.get('model_used', 'N/A'))
+    if models_used and models_used != 'none':
+        # 如果有多个模型，用箭头连接表示先后顺序
+        if ',' in models_used:
+            model_list = [m.strip() for m in models_used.split(',')]
+            models_display = ' → '.join(model_list)
+            lines.append(f"🤖 翻译模型：{models_display}")
+        else:
+            lines.append(f"🤖 翻译模型：{models_used}")
+    else:
+        lines.append(f"🤖 翻译模型：N/A")
     lines.append("")
 
-    # 翻译内容
     lines.append("📝 翻译内容")
     lines.append("")
     lines.append(translated_email.get("translated_body", "[无内容]"))
     lines.append("")
 
-    # 状态
     if translated_email.get("success"):
         lines.append("✅ 翻译成功")
     else:
@@ -119,25 +115,19 @@ def send_digest_email(
 ):
     """
     Send a digest email with translated content.
-    
-    (保留用于兼容性，但现在主要使用 send_single_email)
     """
     if errors is None:
         errors = []
     
-    # Build email body
     body = build_digest_body(translated_emails, errors)
     
-    # Subject
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     subject = f"[邮件摘要] {today} - {len(translated_emails)} 封邮件"
     
-    # From address
     if from_email is None:
         inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
         from_email = os.environ.get("AGENTMAIL_FROM_EMAIL", inbox_email)
     
-    # Send via SMTP
     send_email_smtp(
         from_email=from_email,
         to_email=target_email,
@@ -172,7 +162,18 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
         
         lines.append(f"发件人: {email.get('original_sender', 'Unknown')}")
         lines.append(f"时间: {email.get('original_time', '')}")
-        lines.append(f"翻译模型: {email.get('model_used', 'N/A')}")
+        
+        # 显示模型信息
+        models_used = email.get('models_used', email.get('model_used', 'N/A'))
+        if models_used and models_used != 'none':
+            if ',' in models_used:
+                model_list = [m.strip() for m in models_used.split(',')]
+                models_display = ' → '.join(model_list)
+                lines.append(f"翻译模型: {models_display}")
+            else:
+                lines.append(f"翻译模型: {models_used}")
+        else:
+            lines.append(f"翻译模型: N/A")
         lines.append("")
         
         body = email.get("translated_body", "")
@@ -248,4 +249,3 @@ def send_simple_email(
         from_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     
     send_email_smtp(from_email, to_email, subject, body)
-
