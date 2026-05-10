@@ -6,7 +6,7 @@ Translation logic:
 2. For long articles (>2000 words), split by natural paragraphs
 3. Translate each part with fallback model chain
 4. Chinese summary length ≈ English word count × 80%
-5. Mark model used for each article
+5. Track all models used across segments (for accurate model attribution)
 """
 
 import os
@@ -43,7 +43,6 @@ SUMMARY_PROMPT = """你是一个专业的文章摘要翻译助手。
 
 def count_words(text: str) -> int:
     """Count words in text (approximate for mixed content)."""
-    # Split by whitespace and count
     words = text.split()
     return len(words)
 
@@ -51,15 +50,7 @@ def count_words(text: str) -> int:
 def split_by_paragraphs(text: str, max_words: int = 2000) -> List[str]:
     """
     Split text into parts by natural paragraphs, each part <= max_words.
-    
-    Args:
-        text: The text to split
-        max_words: Maximum words per part (default 2000)
-        
-    Returns:
-        List of text parts
     """
-    # Split into paragraphs (double newline or single newline)
     paragraphs = re.split(r'\n\s*\n|\n', text.strip())
     paragraphs = [p.strip() for p in paragraphs if p.strip()]
     
@@ -73,30 +64,23 @@ def split_by_paragraphs(text: str, max_words: int = 2000) -> List[str]:
     for para in paragraphs:
         para_words = count_words(para)
         
-        # If single paragraph exceeds max_words, we still include it (can't split mid-para)
         if para_words > max_words:
-            # Save current part if not empty
             if current_part:
                 parts.append('\n\n'.join(current_part))
                 current_part = []
                 current_words = 0
-            # Add this large paragraph as its own part
             parts.append(para)
             continue
         
-        # Check if adding this paragraph would exceed limit
         if current_words + para_words > max_words:
-            # Save current part and start new one
             if current_part:
                 parts.append('\n\n'.join(current_part))
             current_part = [para]
             current_words = para_words
         else:
-            # Add to current part
             current_part.append(para)
             current_words += para_words
     
-    # Don't forget the last part
     if current_part:
         parts.append('\n\n'.join(current_part))
     
@@ -107,63 +91,42 @@ def extract_article_content(body: str, subject: str = "") -> str:
     """
     Extract article content from email body.
     Remove ads, footers, signatures, and other non-content.
-    
-    Args:
-        body: Raw email body text
-        subject: Email subject (for context)
-        
-    Returns:
-        Cleaned article content
     """
     if not body:
         return ""
     
-    # Common patterns to remove
     remove_patterns = [
-        # Unsubscribe links
         r'\[Unsubscribe\].*',
         r'Click here to unsubscribe.*',
         r'To unsubscribe.*',
         r'取消订阅.*',
-        # View in browser links
         r'\[View in browser\].*',
         r'View this email in your browser.*',
-        # Social media links
         r'Follow us on.*',
         r'Connect with us.*',
-        # Footer patterns
         r'---+\s*$',
         r'___+\s*$',
         r'\*\*\*+\s*$',
-        # Copyright
         r'Copyright ©.*',
         r'© \d{4}.*',
-        # Powered by
         r'Powered by.*',
-        # Empty lines at end
     ]
     
     text = body
     
-    # Remove common noise patterns
     for pattern in remove_patterns:
         text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.MULTILINE)
     
-    # Try to detect and extract main content
     lines = text.split('\n')
-    
-    # Remove lines that look like footers/signatures
     content_lines = []
     footer_started = False
     
     for i, line in enumerate(lines):
         stripped = line.strip()
         
-        # Skip empty lines at the very beginning
         if not content_lines and not stripped:
             continue
         
-        # Detect footer start
         if any([
             stripped.startswith('--'),
             stripped.startswith('Best,'),
@@ -171,17 +134,14 @@ def extract_article_content(body: str, subject: str = "") -> str:
             stripped.startswith('Thanks,'),
             stripped.startswith('Thank you,'),
             stripped.startswith('Sincerely,'),
-            re.match(r'^\w+\s*$', stripped) and i > len(lines) - 5,  # Name signature
+            re.match(r'^\w+\s*$', stripped) and i > len(lines) - 5,
         ]):
             footer_started = True
         
         if not footer_started:
             content_lines.append(line)
     
-    # Join and clean up
     content = '\n'.join(content_lines)
-    
-    # Remove excessive whitespace
     content = re.sub(r'\n{3,}', '\n\n', content)
     content = content.strip()
     
@@ -196,21 +156,12 @@ def translate_part_with_model(
     """
     Translate a single part with a specific model.
     Automatically selects the correct API endpoint based on model provider.
-    
-    Args:
-        content: Text content to translate
-        model: Model name (e.g., "nvidia/minimaxai/minimax-m2.7" or "openrouter/auto")
-        word_count: Word count for prompt
-        
-    Returns:
-        Translated text
     """
     prompt = SUMMARY_PROMPT.format(
         word_count=word_count,
         content=content
     )
     
-    # Get the correct API URL and key based on model provider
     api_url = get_api_url_for_model(model)
     api_key = get_api_key_for_model(model)
     
@@ -222,13 +173,10 @@ def translate_part_with_model(
         "Content-Type": "application/json"
     }
     
-    # OpenRouter requires HTTP-Referer header
     if "openrouter" in api_url:
         headers["HTTP-Referer"] = "https://github.com/luyt12/email-digest"
         headers["X-Title"] = "Email Digest"
     
-    # Estimate max_tokens: Chinese chars ≈ English words × 80%
-    # But we need more tokens for the response
     max_tokens = max(LLM_MAX_TOKENS, int(word_count * 1.2))
     
     payload = {
@@ -255,7 +203,6 @@ def translate_part_with_model(
     
     data = response.json()
     
-    # Extract response
     result = None
     if "choices" in data:
         choices = data["choices"]
@@ -265,7 +212,6 @@ def translate_part_with_model(
     if not result and "output" in data:
         result = data["output"]
     
-    # Check if result is empty - trigger fallback to next model
     if not result or not result.strip():
         raise Exception(f"API returned empty content for model {model}")
     
@@ -276,11 +222,12 @@ def translate_article(content: str) -> Tuple[str, str, bool]:
     """
     Translate an article with paragraph splitting and model fallback.
     
-    Args:
-        content: Article content to translate
-        
     Returns:
-        Tuple of (translated_text, model_used, success)
+        Tuple of (translated_text, models_used_summary, success)
+    
+    models_used_summary: comma-separated list of models actually used,
+                        e.g. "minimaxai/minimax-m2.7" (single) or
+                        "minimaxai/minimax-m2.7, openrouter/free" (multiple)
     """
     if not content or not content.strip():
         return "", "none", False
@@ -288,11 +235,11 @@ def translate_article(content: str) -> Tuple[str, str, bool]:
     word_count = count_words(content)
     print(f"    Article word count: {word_count}")
     
-    # Split into parts if needed
     parts = split_by_paragraphs(content, max_words=2000)
     print(f"    Split into {len(parts)} part(s)")
     
     translated_parts = []
+    models_used = []      # Track all models actually used (preserving order)
     successful_model = None
     
     for i, part in enumerate(parts):
@@ -302,14 +249,22 @@ def translate_article(content: str) -> Tuple[str, str, bool]:
         translated = None
         last_error = None
         
-        # Try models in order
-        models_to_try = MODEL_CHAIN if not successful_model else [successful_model] + [m for m in MODEL_CHAIN if m != successful_model]
+        # Build model priority list:
+        # - First segment: try MODEL_CHAIN in order
+        # - Subsequent segments: sticky model first, then MODEL_CHAIN as fallback
+        if not successful_model:
+            models_to_try = MODEL_CHAIN
+        else:
+            models_to_try = [successful_model] + [m for m in MODEL_CHAIN if m != successful_model]
         
         for model in models_to_try:
             try:
                 translated = translate_part_with_model(part, model, part_words)
                 if not successful_model:
                     successful_model = model
+                # Always track model usage (deduplicated later for display)
+                if model not in models_used:
+                    models_used.append(model)
                 print(f"      ✓ Model {model} succeeded")
                 break
             except Exception as e:
@@ -323,24 +278,18 @@ def translate_article(content: str) -> Tuple[str, str, bool]:
             # All models failed for this part - use original
             print(f"      ⚠ All models failed, using original text")
             translated_parts.append(f"[翻译失败]\n\n{part}")
-            return '\n\n'.join(translated_parts), "none", False
+            models_summary = ", ".join(models_used) if models_used else "none"
+            return '\n\n'.join(translated_parts), models_summary, False
     
-    # Combine all parts
     final_translation = '\n\n'.join(translated_parts)
-    return final_translation, successful_model or "none", True
+    models_summary = ", ".join(models_used) if models_used else "none"
+    return final_translation, models_summary, True
 
 
 def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
     """
     Translate email content to Chinese summary.
-    
-    Args:
-        email_content: Dict with subject, body, from, received_at
-        
-    Returns:
-        Dict with original and translated content, including word/char counts
     """
-    # Extract email fields
     sender = email_content.get("from", {})
     if isinstance(sender, dict):
         sender_info = sender.get("name", "") or sender.get("email", "")
@@ -351,14 +300,10 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
     body = email_content.get("body", "")
     received_at = email_content.get("received_at", "")
     
-    # Extract article content from body
     article_content = extract_article_content(body, subject)
-    
-    # Count English words in original
     english_word_count = count_words(article_content) if article_content else 0
     
     if not article_content:
-        # No content to translate
         return {
             "id": email_content.get("id"),
             "original_sender": sender_info,
@@ -367,16 +312,13 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
             "original_body": body[:500],
             "translated_subject": subject,
             "translated_body": "[无正文内容]",
-            "model_used": "none",
+            "models_used": "none",
             "success": False,
             "english_word_count": 0,
             "chinese_char_count": 0
         }
     
-    # Translate the article
-    translated, model_used, success = translate_article(article_content)
-    
-    # Count Chinese characters in translation
+    translated, models_used, success = translate_article(article_content)
     chinese_char_count = len(translated.replace('\n', '').replace(' ', '')) if translated else 0
     
     return {
@@ -387,7 +329,7 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
         "original_body": body[:500],
         "translated_subject": subject,
         "translated_body": translated,
-        "model_used": model_used,
+        "models_used": models_used,      # Changed from model_used → models_used (string, comma-separated)
         "success": success,
         "english_word_count": english_word_count,
         "chinese_char_count": chinese_char_count
@@ -397,13 +339,6 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
 def translate_emails_batch(emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Translate multiple emails in batch.
-    Process one at a time with delay for rate limits.
-    
-    Args:
-        emails: List of email content dicts
-        
-    Returns:
-        List of translated email dicts
     """
     results = []
     
@@ -413,9 +348,7 @@ def translate_emails_batch(emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         result = translate_email(email)
         results.append(result)
         
-        # Delay between requests
         if i < len(emails) - 1:
             time.sleep(2)
     
     return results
-
