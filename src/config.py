@@ -31,10 +31,10 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 # Format: "provider/model-name" or just "model-name" for NVIDIA
 MODEL_CHAIN = [
     "minimaxai/minimax-m2.7",                  # Primary (NVIDIA)
-    "stepfun-ai/step-3.5-flash",              # Fallback 1 (NVIDIA)
-    "google/gemma-3n-e2b-it",                 # Fallback 2 (NVIDIA)
-    "mistralai/mistral-nemotron",             # Fallback 3 (NVIDIA)
-    "openrouter/free",                        # OpenRouter free tier (备选)
+    "openrouter/free",                         # Fallback 1 (OpenRouter) ← 从第5位移到第2位
+    "stepfun-ai/step-3.5-flash",              # Fallback 2 (NVIDIA)
+    "google/gemma-3n-e2b-it",                 # Fallback 3 (NVIDIA)
+    "mistralai/mistral-nemotron",             # Fallback 4 (NVIDIA)
 ]
 
 # SMTP settings for sending (AgentMail SMTP)
