@@ -5,7 +5,7 @@ Translation logic:
 1. Extract article content from email body (ignore ads, footers, etc.)
 2. For long articles (>2000 words), split by natural paragraphs
 3. Translate each part with fallback model chain
-4. Chinese summary length ≈ English word count × 80%
+4. Validate translation result (Chinese char count vs English word count)
 5. Track all models used across segments (for accurate model attribution)
 """
 
@@ -148,6 +148,45 @@ def extract_article_content(body: str, subject: str = "") -> str:
     return content
 
 
+def validate_translation(original_word_count: int, translated_text: str) -> bool:
+    """
+    Validate translation result quality.
+    
+    Checks if the Chinese character count is reasonable compared to the original
+    English word count. If the ratio is too low, the translation likely failed
+    (e.g., model returned empty content, garbage, or only a partial translation).
+    
+    Threshold: translated chars should be at least 30% of original word count.
+    This is a conservative threshold to catch extreme failures like:
+        1889 English words → 58 Chinese characters (ratio ~0.03)
+    
+    Returns:
+        True if translation seems valid, False otherwise.
+    """
+    if not translated_text or not translated_text.strip():
+        print(f"      ⚠ Validation failed: empty translation")
+        return False
+    
+    # Count Chinese characters (CJK Unified Ideographs)
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', translated_text))
+    
+    # Also count all non-space characters as fallback (for mixed content)
+    non_space_chars = len(re.sub(r'\s', '', translated_text))
+    
+    # Use the larger of chinese_chars and non_space_chars for validation
+    char_count = max(chinese_chars, non_space_chars)
+    
+    # Threshold: translated chars should be at least 30% of original word count
+    min_chars = original_word_count * 0.3
+    
+    if char_count < min_chars:
+        print(f"      ⚠ Translation validation failed: {char_count} chars < {min_chars:.0f} min (ratio {char_count/original_word_count:.2f})")
+        return False
+    
+    print(f"      ✓ Translation validation passed: {char_count} chars / {original_word_count} words (ratio {char_count/original_word_count:.2f})")
+    return True
+
+
 def translate_part_with_model(
     content: str, 
     model: str, 
@@ -260,6 +299,11 @@ def translate_article(content: str) -> Tuple[str, str, bool]:
         for model in models_to_try:
             try:
                 translated = translate_part_with_model(part, model, part_words)
+                
+                # Validate translation result
+                if not validate_translation(part_words, translated):
+                    raise Exception(f"Translation validation failed for model {model}")
+                
                 if not successful_model:
                     successful_model = model
                 # Always track model usage (deduplicated later for display)
