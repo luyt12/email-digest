@@ -58,13 +58,13 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     """
     构建单封邮件的 HTML 内容。
     
-    格式包含：
-    - 原文信息（标题、发件人、时间）
-    - 翻译内容
-    - Media files 图片（如果有）
-    - 字数统计和模型信息（显示所有实际使用的模型）
+    格式：
+    - 标题
+    - 图片（Media files，如果有）
+    - 正文（翻译内容）
+    - 统计信息和模型标注
     """
-    original_subject = translated_email.get('original_subject', '无主题')
+    original_subject = translated_email.get('original_subject', '无标题')
     cleaned_title = re.sub(r'^[^：:]+[：:]\s*', '', original_subject).strip() or original_subject
 
     # Start HTML document
@@ -77,11 +77,10 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     html_parts.append('  .header { background: #1a237e; color: white; padding: 16px 20px; }')
     html_parts.append('  .header h1 { margin: 0 0 4px 0; font-size: 18px; }')
     html_parts.append('  .meta { font-size: 12px; opacity: 0.85; }')
+    html_parts.append('  .media-section { padding: 0 20px; }')
+    html_parts.append('  .media-section img { max-width: 100%; height: auto; border-radius: 4px; margin-bottom: 8px; display: block; }')
     html_parts.append('  .content { padding: 20px; font-size: 15px; line-height: 1.8; color: #333; }')
     html_parts.append('  .content p { margin: 0 0 12px 0; }')
-    html_parts.append('  .media-section { padding: 0 20px 20px 20px; }')
-    html_parts.append('  .media-section h3 { font-size: 14px; color: #666; margin: 0 0 12px 0; border-top: 1px solid #eee; padding-top: 16px; }')
-    html_parts.append('  .media-section img { max-width: 100%; height: auto; border-radius: 4px; margin-bottom: 12px; display: block; }')
     html_parts.append('  .footer { padding: 12px 20px; background: #fafafa; font-size: 11px; color: #999; text-align: center; border-top: 1px solid #eee; }')
     html_parts.append('  .stats { font-size: 12px; color: #888; }')
     html_parts.append('  .model-tag { color: #1565c0; }')
@@ -90,7 +89,7 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     html_parts.append('</head><body>')
     html_parts.append('<div class="container">')
     
-    # Header
+    # Header - Title
     html_parts.append('<div class="header">')
     html_parts.append(f'  <h1>{_escape_html(cleaned_title)}</h1>')
     
@@ -127,28 +126,24 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     html_parts.append(f'  <div class="meta">{" &nbsp;|&nbsp; ".join(meta_items)}</div>')
     html_parts.append('</div>')  # close header
     
-    # Content (translated body)
+    # Media files section - BEFORE content (图片在正文正上方)
+    media_urls = translated_email.get('media_urls', [])
+    if media_urls:
+        html_parts.append('<div class="media-section" style="padding-top: 16px;">')
+        for url in media_urls:
+            html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
+        html_parts.append('</div>')
+    
+    # Content (translated body) - 正文在图片下方
     html_parts.append('<div class="content">')
     translated_body = translated_email.get("translated_body", "[无内容]")
-    # Convert newlines to <p> tags for proper HTML rendering
     paragraphs = translated_body.split('\n\n')
     for para in paragraphs:
         para = para.strip()
         if para:
-            # Preserve single newlines as <br>
             para = para.replace('\n', '<br>')
             html_parts.append(f'<p>{para}</p>')
     html_parts.append('</div>')  # close content
-    
-    # Media files section (if any)
-    media_urls = translated_email.get('media_urls', [])
-    if media_urls:
-        html_parts.append('<div class="media-section">')
-        html_parts.append('<h3>📎 相关图片</h3>')
-        for url in media_urls:
-            # Use <img> tag to embed image from URL
-            html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
-        html_parts.append('</div>')
     
     # Footer
     html_parts.append('<div class="footer">')
@@ -211,9 +206,9 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
     html_parts.append('  .article:last-of-type { border-bottom: none; }')
     html_parts.append('  .article h2 { font-size: 16px; color: #1a1a1a; margin: 0 0 8px 0; }')
     html_parts.append('  .article .meta { font-size: 12px; color: #888; margin-bottom: 8px; }')
+    html_parts.append('  .article .media img { max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0; display: block; }')
     html_parts.append('  .article .content { font-size: 14px; line-height: 1.7; color: #333; }')
     html_parts.append('  .article .content p { margin: 0 0 8px 0; }')
-    html_parts.append('  .article img { max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0; display: block; }')
     html_parts.append('  .footer { padding: 12px 20px; background: #fafafa; font-size: 11px; color: #999; text-align: center; border-top: 1px solid #eee; }')
     html_parts.append('</style>')
     html_parts.append('</head><body>')
@@ -249,6 +244,14 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
         sender = email.get('original_sender', 'Unknown')
         html_parts.append(f'<div class="meta">发件人: {_escape_html(sender)} | {" | ".join(meta_items)}</div>')
         
+        # Media files (before content in digest too)
+        media_urls = email.get('media_urls', [])
+        if media_urls:
+            html_parts.append('<div class="media">')
+            for url in media_urls:
+                html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
+            html_parts.append('</div>')
+        
         # Content
         body = email.get("translated_body", "")
         html_parts.append('<div class="content">')
@@ -259,12 +262,6 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
                 para = para.replace('\n', '<br>')
                 html_parts.append(f'<p>{para}</p>')
         html_parts.append('</div>')
-        
-        # Media files
-        media_urls = email.get('media_urls', [])
-        if media_urls:
-            for url in media_urls:
-                html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
         
         html_parts.append('</div>')  # close article
     
