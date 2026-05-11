@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fetch emails from AgentMail API."""
 
+import re
 import requests
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -43,6 +44,59 @@ def fetch_recent_emails(api_key: str, inbox_id: str, limit: int = 50) -> List[Di
     if isinstance(data, dict):
         return data.get("messages", data.get("data", []))
     return data
+
+
+def extract_media_urls(text: str) -> List[str]:
+    """
+    Extract image URLs from 'Media files:' lines in email body.
+    
+    Looks for lines like:
+        Media files:
+        https://example.com/image.jpg
+    
+    Returns:
+        List of image URLs found after 'Media files:' markers.
+    """
+    urls = []
+    if not text:
+        return urls
+    
+    lines = text.split('\n')
+    in_media_section = False
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Check if this line starts a Media files section
+        if stripped.lower().startswith('media files:') or stripped.lower().startswith('media files :'):
+            in_media_section = True
+            # Check if there's a URL on the same line after the colon
+            after_colon = stripped.split(':', 1)[1].strip() if ':' in stripped else ''
+            if after_colon and (after_colon.startswith('http://') or after_colon.startswith('https://')):
+                # Clean up HTML entities
+                url = after_colon.replace('&amp;', '&')
+                urls.append(url)
+            continue
+        
+        if in_media_section:
+            # If we hit another section header or empty context, stop
+            if not stripped:
+                # Allow one blank line after Media files:
+                continue
+            if stripped.startswith('http://') or stripped.startswith('https://'):
+                # Clean up HTML entities in URL
+                url = stripped.replace('&amp;', '&')
+                urls.append(url)
+            else:
+                # Not a URL - end of media section
+                in_media_section = False
+    
+    if urls:
+        print(f"    Found {len(urls)} media file(s) in email body")
+        for i, url in enumerate(urls):
+            print(f"      Media {i+1}: {url[:80]}...")
+    
+    return urls
 
 
 def get_message_content(api_key: str, inbox_id: str, message_id: str) -> Dict[str, Any]:
@@ -95,6 +149,9 @@ def get_message_content(api_key: str, inbox_id: str, message_id: str) -> Dict[st
     else:
         print(f"    WARNING: No body text extracted!")
     
+    # Extract media URLs from body
+    media_urls = extract_media_urls(body_text)
+    
     return {
         "id": data.get("id"),
         "subject": data.get("subject", "No subject"),
@@ -102,6 +159,7 @@ def get_message_content(api_key: str, inbox_id: str, message_id: str) -> Dict[st
         "to": data.get("to", []),
         "received_at": data.get("received_at") or data.get("timestamp") or data.get("created_at"),
         "body": body_text,
+        "media_urls": media_urls,
         "raw": data
     }
 
