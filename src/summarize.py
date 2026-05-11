@@ -359,7 +359,8 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
             "models_used": "none",
             "success": False,
             "english_word_count": 0,
-            "chinese_char_count": 0
+            "chinese_char_count": 0,
+            "media_urls": email_content.get("media_urls", [])
         }
     
     translated, models_used, success = translate_article(article_content)
@@ -376,7 +377,8 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
         "models_used": models_used,      # Changed from model_used → models_used (string, comma-separated)
         "success": success,
         "english_word_count": english_word_count,
-        "chinese_char_count": chinese_char_count
+        "chinese_char_count": chinese_char_count,
+        "media_urls": email_content.get("media_urls", [])
     }
 
 
