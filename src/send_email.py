@@ -138,7 +138,7 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> Tuple[str, List
     html_parts.append('  .container { max-width: 680px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }')
     html_parts.append('  .header { background: #1a237e; color: white; padding: 16px 20px; }')
     html_parts.append('  .header h1 { margin: 0 0 4px 0; font-size: 18px; }')
-        html_parts.append('  .header .original-title { font-size: 12px; opacity: 0.7; margin-top: 4px; }')
+    html_parts.append('  .header .original-title { font-size: 12px; opacity: 0.7; margin-top: 4px; }')
     html_parts.append('  .header .author { font-size: 13px; opacity: 0.9; margin-top: 6px; color: #ddd; }')
     html_parts.append('  .meta { font-size: 12px; opacity: 0.85; }')
     html_parts.append('  .media-section { padding: 0 20px; }')
