@@ -138,7 +138,8 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> Tuple[str, List
     html_parts.append('  .container { max-width: 680px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }')
     html_parts.append('  .header { background: #1a237e; color: white; padding: 16px 20px; }')
     html_parts.append('  .header h1 { margin: 0 0 4px 0; font-size: 18px; }')
-    html_parts.append('  .header .original-title { font-size: 12px; opacity: 0.7; margin-top: 4px; }')
+    html_parts.append('  .header .original-title { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+  .header .author { font-size: 13px; opacity: 0.9; margin-top: 6px; color: #ddd; }')
     html_parts.append('  .meta { font-size: 12px; opacity: 0.85; }')
     html_parts.append('  .media-section { padding: 0 20px; }')
     html_parts.append('  .media-section img { max-width: 100%; height: auto; border-radius: 4px; margin-bottom: 8px; display: block; }')
@@ -155,6 +156,11 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> Tuple[str, List
     # Header - Title (translated)
     html_parts.append('<div class="header">')
     html_parts.append(f'  <h1>{_escape_html(cleaned_title)}</h1>')
+    
+    # Show author if available (原文作者，不翻译)
+    author = translated_email.get('author', '')
+    if author:
+        html_parts.append(f'  <div class="author">作者: {_escape_html(author)}</div>')
     
     # Show original title if different from translated
     if original_subject and original_subject != cleaned_title:
