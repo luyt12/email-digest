@@ -66,6 +66,52 @@ def count_words(text: str) -> int:
     return len(words)
 
 
+def extract_author(body: str) -> str:
+    """
+    Extract article author from email body text.
+    Looks for common author attribution patterns at the beginning of the article.
+    
+    Supported patterns:
+    - "By John Smith" (NYT, New Yorker, most outlets)
+    - "By J. Smith" (initials)
+    - "By John Smith and Jane Doe" (multiple authors)
+    - "— FirstName LastName" (The Atlantic style)
+    - "Author: FirstName LastName"
+    - "Text by FirstName LastName"
+    - "Reported by FirstName LastName"
+    - "Written by FirstName LastName"
+    
+    Returns author name string or empty string if not found.
+    """
+    if not body:
+        return ""
+    
+    # Get first 800 chars to look for author
+    first_part = body[:800]
+    
+    # Pattern 1: "By Name" - most common
+    by_match = re.search(r'^\s*By\s+([A-Z][A-Za-z\s\.\-\']{2,60}),?\s*(?:and|,|$)', first_part, re.MULTILINE)
+    if by_match:
+        return by_match.group(1).strip()
+    
+    # Pattern 2: "— Name" or "– Name" or "- Name"
+    dash_match = re.search(r'^\s*[—–-]\s*([A-Z][A-Za-z\s\.\-\']{2,60}),?\s*(?:and|,|$)', first_part, re.MULTILINE)
+    if dash_match:
+        return dash_match.group(1).strip()
+    
+    # Pattern 3: "Author: Name"
+    author_match = re.search(r'^\s*Author:\s*([A-Z][A-Za-z\s\.\-\']{2,60})', first_part, re.MULTILINE | re.IGNORECASE)
+    if author_match:
+        return author_match.group(1).strip()
+    
+    # Pattern 4: "Text by Name" / "Written by Name" / "Reported by Name"
+    text_by_match = re.search(r'^(?:Text|Written|Reported)\s+by\s+([A-Z][A-Za-z\s\.\-\']{2,60})', first_part, re.MULTILINE | re.IGNORECASE)
+    if text_by_match:
+        return text_by_match.group(1).strip()
+    
+    return ""
+
+
 def translate_title(title: str) -> Tuple[str, bool]:
     """
     Translate email subject/title to Chinese.
@@ -442,6 +488,11 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
     print(f"  Translating title: {subject[:50]}...")
     translated_subject, title_success = translate_title(subject)
     
+    # Extract author from body before article content extraction
+    author = extract_author(body)
+    if author:
+        print(f"    Found author: {author}")
+    
     article_content = extract_article_content(body, subject)
     english_word_count = count_words(article_content) if article_content else 0
     
@@ -454,6 +505,7 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
             "original_body": body[:500],
             "translated_subject": translated_subject,
             "translated_body": "[无正文内容]",
+            "author": author,
             "models_used": "none",
             "success": False,
             "english_word_count": 0,
@@ -476,6 +528,7 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
         "success": success,
         "english_word_count": english_word_count,
         "chinese_char_count": chinese_char_count,
+        "author": author,
         "media_urls": email_content.get("media_urls", [])
     }
 
