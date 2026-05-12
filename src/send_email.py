@@ -3,19 +3,26 @@
 
 修改版：支持单封邮件发送，标题为"来源名 + 文章标题"
 支持显示多段翻译实际使用的所有模型
-支持嵌入 Media files 图片
+支持嵌入 Media files 图片（contentstack 域名直接链接，其他域名下载嵌入）
 """
 
 import re
 import smtplib
 import os
 import urllib.parse
+import requests
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 
 from config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD
+
+
+# URLs starting with this prefix will be embedded as direct links
+DIRECT_LINK_PREFIX = "https://gcp-na-images.contentstack.com/"
 
 
 def send_single_email(
@@ -26,7 +33,8 @@ def send_single_email(
     """
     发送单封翻译后的邮件。
     """
-    body = build_single_email_body(translated_email)
+    # Build email body and get embedded images info
+    body, embedded_images = build_single_email_body(translated_email)
     
     if subject is None:
         sender = translated_email.get("original_sender", "Unknown")
@@ -41,7 +49,8 @@ def send_single_email(
         to_email=target_email,
         subject=subject,
         body=body,
-        is_html=True  # Use HTML to support images
+        is_html=True,
+        embedded_images=embedded_images
     )
 
 
@@ -54,18 +63,71 @@ def _escape_html(text: str) -> str:
     return text
 
 
-def build_single_email_body(translated_email: Dict[str, Any]) -> str:
+def _download_image(url: str, timeout: int = 30) -> Optional[bytes]:
+    """
+    Download image from URL.
+    Returns image bytes or None if failed.
+    """
+    try:
+        # Handle m3u8 video playlists - skip them
+        if url.endswith('.m3u8') or 'manifest' in url.lower():
+            print(f"      Skipping video playlist: {url[:60]}...")
+            return None
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'image/*,*/*;q=0.8'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=timeout, stream=True)
+        
+        if response.status_code != 200:
+            print(f"      Failed to download image: HTTP {response.status_code}")
+            return None
+        
+        # Check content type
+        content_type = response.headers.get('Content-Type', '')
+        if not content_type.startswith('image/'):
+            print(f"      Skipping non-image content: {content_type}")
+            return None
+        
+        # Read image data (limit to 5MB)
+        image_data = b''
+        for chunk in response.iter_content(chunk_size=8192):
+            image_data += chunk
+            if len(image_data) > 5 * 1024 * 1024:  # 5MB limit
+                print(f"      Image too large, skipping")
+                return None
+        
+        print(f"      Downloaded image: {len(image_data)} bytes")
+        return image_data
+    except Exception as e:
+        print(f"      Error downloading image: {str(e)[:100]}")
+        return None
+
+
+def build_single_email_body(translated_email: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
     """
     构建单封邮件的 HTML 内容。
     
+    Returns:
+        Tuple of (html_body, embedded_images)
+        embedded_images: list of {"cid": str, "data": bytes, "mime_type": str}
+    
     格式：
-    - 标题
+    - 标题（翻译后的中文标题）
     - 图片（Media files，如果有）
     - 正文（翻译内容）
     - 统计信息和模型标注
     """
-    original_subject = translated_email.get('original_subject', '无标题')
-    cleaned_title = re.sub(r'^[^：:]+[：:]\s*', '', original_subject).strip() or original_subject
+    # Use translated subject for title, fallback to original if not available
+    translated_subject = translated_email.get('translated_subject') or translated_email.get('original_subject', '无标题')
+    original_subject = translated_email.get('original_subject', '')
+    
+    # Clean the translated title (remove sender prefix if present)
+    cleaned_title = re.sub(r'^[^：:]+[：:]\s*', '', translated_subject).strip() or translated_subject
+
+    embedded_images = []
 
     # Start HTML document
     html_parts = []
@@ -76,6 +138,7 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     html_parts.append('  .container { max-width: 680px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }')
     html_parts.append('  .header { background: #1a237e; color: white; padding: 16px 20px; }')
     html_parts.append('  .header h1 { margin: 0 0 4px 0; font-size: 18px; }')
+    html_parts.append('  .header .original-title { font-size: 12px; opacity: 0.7; margin-top: 4px; }')
     html_parts.append('  .meta { font-size: 12px; opacity: 0.85; }')
     html_parts.append('  .media-section { padding: 0 20px; }')
     html_parts.append('  .media-section img { max-width: 100%; height: auto; border-radius: 4px; margin-bottom: 8px; display: block; }')
@@ -89,9 +152,13 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     html_parts.append('</head><body>')
     html_parts.append('<div class="container">')
     
-    # Header - Title
+    # Header - Title (translated)
     html_parts.append('<div class="header">')
     html_parts.append(f'  <h1>{_escape_html(cleaned_title)}</h1>')
+    
+    # Show original title if different from translated
+    if original_subject and original_subject != cleaned_title:
+        html_parts.append(f'  <div class="original-title">原文: {_escape_html(original_subject)}</div>')
     
     # Meta info
     meta_items = []
@@ -131,7 +198,38 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     if media_urls:
         html_parts.append('<div class="media-section" style="padding-top: 16px;">')
         for url in media_urls:
-            html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
+            if url.startswith(DIRECT_LINK_PREFIX):
+                # Direct link for contentstack URLs
+                html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
+            else:
+                # Download and embed other images
+                print(f"      Downloading image: {url[:60]}...")
+                image_data = _download_image(url)
+                
+                if image_data:
+                    # Generate unique CID
+                    cid = f"img_{uuid.uuid4().hex[:8]}"
+                    
+                    # Detect MIME type from URL or data
+                    mime_type = 'image/jpeg'  # default
+                    if '.png' in url.lower():
+                        mime_type = 'image/png'
+                    elif '.gif' in url.lower():
+                        mime_type = 'image/gif'
+                    elif '.webp' in url.lower():
+                        mime_type = 'image/webp'
+                    
+                    embedded_images.append({
+                        "cid": cid,
+                        "data": image_data,
+                        "mime_type": mime_type
+                    })
+                    
+                    # Use CID reference in HTML
+                    html_parts.append(f'<img src="cid:{cid}" alt="Media" />')
+                else:
+                    # Fallback to direct link if download failed
+                    html_parts.append(f'<img src="{_escape_html(url)}" alt="Media" loading="lazy" />')
         html_parts.append('</div>')
     
     # Content (translated body) - 正文在图片下方
@@ -157,7 +255,7 @@ def build_single_email_body(translated_email: Dict[str, Any]) -> str:
     html_parts.append('</div>')  # close container
     html_parts.append('</body></html>')
     
-    return '\n'.join(html_parts)
+    return '\n'.join(html_parts), embedded_images
 
 
 def send_digest_email(
@@ -222,8 +320,9 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
     for i, email in enumerate(translated_emails):
         html_parts.append('<div class="article">')
         
-        subject = email.get('original_subject', '无主题')
-        html_parts.append(f'<h2>{_escape_html(subject)}</h2>')
+        # Use translated subject for title in digest
+        translated_subject = email.get('translated_subject') or email.get('original_subject', '无主题')
+        html_parts.append(f'<h2>{_escape_html(translated_subject)}</h2>')
         
         # Meta
         meta_items = []
@@ -245,6 +344,7 @@ def build_digest_body(translated_emails: List[Dict[str, Any]], errors: List[str]
         html_parts.append(f'<div class="meta">发件人: {_escape_html(sender)} | {" | ".join(meta_items)}</div>')
         
         # Media files (before content in digest too)
+        # Note: Digest uses direct links for all images to avoid complexity
         media_urls = email.get('media_urls', [])
         if media_urls:
             html_parts.append('<div class="media">')
@@ -285,18 +385,27 @@ def send_email_smtp(
     subject: str,
     body: str,
     is_html: bool = False,
+    embedded_images: List[Dict[str, Any]] = None,
     smtp_host: str = None,
     smtp_port: int = None,
     smtp_user: str = None,
     smtp_password: str = None
 ):
-    """Send an email via SMTP."""
+    """
+    Send an email via SMTP.
+    Supports embedded images via CID (Content-ID).
+    """
     smtp_host = smtp_host or SMTP_HOST
     smtp_port = smtp_port or SMTP_PORT
     smtp_user = smtp_user or SMTP_USER
     smtp_password = smtp_password or SMTP_PASSWORD
     
-    msg = MIMEMultipart("alternative")
+    if embedded_images:
+        # Use multipart/related for embedded images
+        msg = MIMEMultipart("related")
+    else:
+        msg = MIMEMultipart("alternative")
+    
     msg["Subject"] = subject
     msg["From"] = from_email
     msg["To"] = to_email
@@ -307,6 +416,14 @@ def send_email_smtp(
         part = MIMEText(body, "plain", "utf-8")
     
     msg.attach(part)
+    
+    # Attach embedded images
+    if embedded_images:
+        for img_info in embedded_images:
+            img_part = MIMEImage(img_info["data"], _subtype=img_info["mime_type"].split("/")[-1])
+            img_part.add_header("Content-ID", f'<{img_info["cid"]}>')
+            img_part.add_header("Content-Disposition", "inline")
+            msg.attach(img_part)
     
     with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
         server.login(smtp_user, smtp_password)
