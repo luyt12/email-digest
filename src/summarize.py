@@ -2,11 +2,12 @@
 """LLM summarization and translation of emails.
 
 Translation logic:
-1. Extract article content from email body (ignore ads, footers, etc.)
-2. For long articles (>2000 words), split by natural paragraphs
-3. Translate each part with fallback model chain
-4. Validate translation result (Chinese char count vs English word count)
-5. Track all models used across segments (for accurate model attribution)
+1. Translate the email subject (title)
+2. Extract article content from email body (ignore ads, footers, etc.)
+3. For long articles (>2000 words), split by natural paragraphs
+4. Translate each part with fallback model chain
+5. Validate translation result (Chinese char count vs English word count)
+6. Track all models used across segments (for accurate model attribution)
 """
 
 import os
@@ -22,6 +23,23 @@ from config import (
     MODEL_CHAIN, LLM_TIMEOUT, LLM_MAX_TOKENS,
     get_api_url_for_model, get_api_key_for_model
 )
+
+
+# Title translation prompt
+TITLE_PROMPT = """你是一个专业的标题翻译助手。
+
+任务：将以下英文邮件标题翻译成中文。
+
+翻译原则：
+1. 保持简洁，准确传达原标题的核心含义
+2. 如果标题中包含专有名词（人名、地名、机构名、书名等），在翻译后用括号标注原文
+3. 常见公众人物（如 Biden, Trump, Xi 等）和常见地名（如 US, China, New York 等）无需标注原文
+4. 如果原标题本身包含中文字符，保留原样
+
+英文标题：
+{title}
+
+请直接提供中文翻译，不要添加任何解释或说明。"""
 
 
 # Summary translation prompt (80% compression ratio)
@@ -46,6 +64,81 @@ def count_words(text: str) -> int:
     """Count words in text (approximate for mixed content)."""
     words = text.split()
     return len(words)
+
+
+def translate_title(title: str) -> Tuple[str, bool]:
+    """
+    Translate email subject/title to Chinese.
+    
+    Returns:
+        Tuple of (translated_title, success)
+    """
+    if not title or not title.strip():
+        return title, False
+    
+    # Check if title already contains significant Chinese
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', title))
+    if chinese_chars > len(title) * 0.3:
+        # Already mostly Chinese, return as-is
+        return title, True
+    
+    prompt = TITLE_PROMPT.format(title=title)
+    
+    for model in MODEL_CHAIN:
+        try:
+            api_url = get_api_url_for_model(model)
+            api_key = get_api_key_for_model(model)
+            
+            if not api_key:
+                continue
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            if "openrouter" in api_url:
+                headers["HTTP-Referer"] = "https://github.com/luyt12/email-digest"
+                headers["X-Title"] = "Email Digest"
+            
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 200,
+                "temperature": 0.3
+            }
+            
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                continue
+            
+            data = response.json()
+            result = None
+            
+            if "choices" in data and data["choices"]:
+                result = data["choices"][0].get("message", {}).get("content", "")
+            elif "output" in data:
+                result = data["output"]
+            
+            if result and result.strip():
+                translated = result.strip()
+                # Basic validation: should have some Chinese characters
+                if len(re.findall(r'[\u4e00-\u9fff]', translated)) > 0:
+                    print(f"    Title translated with {model}")
+                    return translated, True
+        except Exception as e:
+            print(f"    Title translation failed with {model}: {str(e)[:50]}")
+            continue
+    
+    # All models failed, return original
+    print(f"    Title translation failed, using original")
+    return title, False
 
 
 def split_by_paragraphs(text: str, max_words: int = 2000) -> List[str]:
@@ -345,6 +438,10 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
     body = email_content.get("body", "")
     received_at = email_content.get("received_at", "")
     
+    # Translate title first
+    print(f"  Translating title: {subject[:50]}...")
+    translated_subject, title_success = translate_title(subject)
+    
     article_content = extract_article_content(body, subject)
     english_word_count = count_words(article_content) if article_content else 0
     
@@ -355,7 +452,7 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
             "original_subject": subject,
             "original_time": received_at,
             "original_body": body[:500],
-            "translated_subject": subject,
+            "translated_subject": translated_subject,
             "translated_body": "[无正文内容]",
             "models_used": "none",
             "success": False,
@@ -373,9 +470,9 @@ def translate_email(email_content: Dict[str, Any]) -> Dict[str, Any]:
         "original_subject": subject,
         "original_time": received_at,
         "original_body": body[:500],
-        "translated_subject": subject,
+        "translated_subject": translated_subject,
         "translated_body": translated,
-        "models_used": models_used,      # Changed from model_used → models_used (string, comma-separated)
+        "models_used": models_used,
         "success": success,
         "english_word_count": english_word_count,
         "chinese_char_count": chinese_char_count,
