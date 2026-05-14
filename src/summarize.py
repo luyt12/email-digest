@@ -39,7 +39,8 @@ TITLE_PROMPT = """你是一个专业的标题翻译助手。
 英文标题：
 {title}
 
-请直接提供中文翻译，不要添加任何解释或说明。"""
+请将翻译结果放在<translation>标签内，例如：<translation>中文翻译结果</translation>
+不要添加任何解释、思考过程或说明。"""
 
 
 # Summary translation prompt (80% compression ratio)
@@ -174,8 +175,34 @@ def translate_title(title: str) -> Tuple[str, bool]:
             
             if result and result.strip():
                 translated = result.strip()
-                # Basic validation: should have some Chinese characters
-                if len(re.findall(r'[\u4e00-\u9fff]', translated)) > 0:
+                
+                # Extract from <translation> tags if present
+                tag_match = re.search(r'<translation>(.*?)</translation>', translated, re.DOTALL)
+                if tag_match:
+                    translated = tag_match.group(1).strip()
+                else:
+                    # No tags found - clean up potential prompt leakage
+                    lines = translated.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        line_stripped = line.strip()
+                        if not line_stripped:
+                            continue
+                        english_ratio = len(re.findall(r'[a-zA-Z]', line_stripped)) / max(len(line_stripped), 1)
+                        chinese_count = len(re.findall(r'[\u4e00-\u9fff]', line_stripped))
+                        if english_ratio > 0.6 and chinese_count == 0:
+                            continue
+                        if re.match(r'^(We need|The principle|So we|However|The instruction|Maybe|Likely|For |In this)', line_stripped, re.IGNORECASE):
+                            continue
+                        cleaned_lines.append(line_stripped)
+                    if cleaned_lines:
+                        translated = cleaned_lines[0]  # Title should be single line
+                    else:
+                        continue
+                
+                # Validation: must have Chinese AND not too long (title vs thinking)
+                chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', translated))
+                if chinese_chars > 0 and len(translated) <= 200:
                     print(f"    Title translated with {model}")
                     return translated, True
         except Exception as e:
@@ -549,3 +576,4 @@ def translate_emails_batch(emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             time.sleep(2)
     
     return results
+
