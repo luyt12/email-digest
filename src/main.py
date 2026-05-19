@@ -3,7 +3,7 @@
 
 重构版：不再通过 SMTP 发送邮件，改为：
 1. 抓取邮件 → 翻译 → 生成 EPUB 文件
-2. 上传 EPUB 到飞书云盘
+2. 通过飞书机器人发送 EPUB 文件消息
 3. 通过飞书机器人发送卡片消息通知用户
 
 修复：processed_emails.json 仅在 EPUB 生成成功后才标记邮件为已处理
@@ -65,30 +65,40 @@ def get_time_window_for_schedule(schedule_index):
 
 
 def get_time_window():
-    """自动计算当前运行的时间窗口。"""
+    """自动计算当前运行的时间窗口。
+    
+    仅在 cron 触发时匹配 schedule 时间点。
+    手动触发（workflow_dispatch）使用最近24小时窗口。
+    """
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
     
-    current_hour = now_beijing.hour
-    current_minute = now_beijing.minute
+    # 检查是否是 GitHub Actions cron 触发
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     
-    matched_schedule = None
-    for i, (h, m) in enumerate(SCHEDULE_TIMES):
-        schedule_minutes = h * 60 + m
-        current_minutes = current_hour * 60 + current_minute
-        diff = abs(schedule_minutes - current_minutes)
+    if event_name == "schedule":
+        # Cron 触发：匹配最近的 schedule 时间点
+        current_hour = now_beijing.hour
+        current_minute = now_beijing.minute
         
-        if diff <= 30:
-            matched_schedule = i
-            break
+        matched_schedule = None
+        for i, (h, m) in enumerate(SCHEDULE_TIMES):
+            schedule_minutes = h * 60 + m
+            current_minutes = current_hour * 60 + current_minute
+            diff = abs(schedule_minutes - current_minutes)
+            
+            if diff <= 30:
+                matched_schedule = i
+                break
+        
+        if matched_schedule is not None:
+            start_time, end_time = get_time_window_for_schedule(matched_schedule)
+            return start_time, end_time, matched_schedule
     
-    if matched_schedule is not None:
-        start_time, end_time = get_time_window_for_schedule(matched_schedule)
-        return start_time, end_time, matched_schedule
-    else:
-        end_time = now_beijing
-        start_time = end_time - timedelta(hours=4)
-        return start_time, end_time, None
+    # 手动触发或未匹配：使用最近24小时窗口
+    end_time = now_beijing
+    start_time = end_time - timedelta(hours=24)
+    return start_time, end_time, None
 
 
 def main():
