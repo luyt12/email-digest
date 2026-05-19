@@ -54,7 +54,7 @@ def generate_epub(
     # Determine output directory: epubs/YYYY-MM/
     if output_dir is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        month_dir = now_beijing.strftime('%Y-%m')
+        month_dir = now_beijing.strftime('%Y%m')
         output_dir = os.path.join(project_root, 'epubs', month_dir)
     
     os.makedirs(output_dir, exist_ok=True)
