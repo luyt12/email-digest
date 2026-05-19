@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       schedule_index:
-        description: '鏃堕棿绐楀彛绱㈠紩 (0-5)'
+        description: '时间窗口索引 (0-5)'
         required: false
         default: ''
         type: string
@@ -23,15 +23,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Restore processed emails cache
-        uses: actions/cache/restore@v4
-        id: cache-restore
-        with:
-          path: data/processed_emails.json
-          key: processed-emails-${{ github.run_number }}
-          restore-keys: |
-            processed-emails-
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -41,21 +32,18 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Fetch, translate and send emails
+      - name: Fetch, translate and generate EPUB
         env:
           AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
           AGENTMAIL_INBOX_ID: ${{ secrets.AGENTMAIL_INBOX_ID }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_FOLDER_TOKEN: ${{ secrets.FEISHU_FOLDER_TOKEN }}
+          FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           SCHEDULE_INDEX: ${{ github.event.inputs.schedule_index }}
         run: python -m src.main
-
-      - name: Save processed emails cache
-        uses: actions/cache/save@v4
-        with:
-          path: data/processed_emails.json
-          key: processed-emails-${{ github.run_number }}
 
       - name: Upload processed IDs (backup)
         uses: actions/upload-artifact@v4
@@ -63,3 +51,10 @@ jobs:
           name: processed-emails
           path: data/processed_emails.json
           retention-days: 7
+
+      - name: Upload EPUB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: epub-files
+          path: epubs/
+          retention-days: 30
