@@ -119,7 +119,6 @@ def main():
     inbox_id = os.environ.get("AGENTMAIL_INBOX_ID", inbox_email)
     
     # Feishu configuration
-    feishu_folder_token = os.environ.get("FEISHU_FOLDER_TOKEN", "")
     feishu_user_open_id = os.environ.get("FEISHU_USER_OPEN_ID", "")
     
     if not api_key:
@@ -290,7 +289,6 @@ def main():
     try:
         upload_result = upload_and_notify(
             epub_path=epub_path,
-            feishu_folder_token=feishu_folder_token,
             feishu_user_open_id=feishu_user_open_id,
             epub_info=epub_info
         )
