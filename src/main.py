@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Email Digest - Fetch, translate and send email digests via GitHub Actions.
+"""Email Digest - Fetch, translate and deliver as EPUB via Feishu.
 
-修改版：每次运行仅抓取上一个时间点之后的邮件，每封邮件单独发送。
-支持手动指定时间窗口索引（用于补救触发）。
+重构版：不再通过 SMTP 发送邮件，改为：
+1. 抓取邮件 → 翻译 → 生成 EPUB 文件
+2. 上传 EPUB 到飞书云盘
+3. 通过飞书机器人发送卡片消息通知用户
+
+修复：processed_emails.json 仅在 EPUB 生成成功后才标记邮件为已处理
 """
 
 import os
@@ -17,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from fetch_emails import fetch_recent_emails, get_message_content
 from summarize import translate_email
-from send_email import send_single_email
+from epub_generator import generate_epub
+from feishu_upload import upload_and_notify
 from utils import load_processed_ids, save_processed_ids
 
 
@@ -38,55 +43,35 @@ def get_time_window_for_schedule(schedule_index):
     
     自动处理跨日补救：如果时间点在当前时间之后，说明是跨日补救，
     自动回退到前一天。
-    
-    Args:
-        schedule_index: 0-5，对应 04:40, 08:40, 13:40, 16:40, 19:40, 23:40
-        
-    Returns:
-        (start_time, end_time) 北京时间的 datetime 对象
     """
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
     
     schedule_hour, schedule_minute = SCHEDULE_TIMES[schedule_index]
     
-    # 结束时间：时间点
     end_time = now_beijing.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
     
-    # 跨日补救：如果结束时间在当前时间之后，回退一天
-    # 例如：次日 02:40 补救 23:40 → end_time 从次日 23:40 回退到前日 23:40
     if end_time > now_beijing:
         end_time -= timedelta(days=1)
     
-    # 开始时间：上一个时间点的下一分钟
     if schedule_index == 0:
-        # 第一个时间点 (04:40)，从当天 0:00 开始
         start_time = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        # 其他时间点
         prev_hour, prev_minute = SCHEDULE_TIMES[schedule_index - 1]
         start_time = end_time.replace(hour=prev_hour, minute=prev_minute, second=0, microsecond=0)
-        # 加一分钟
         start_time = start_time + timedelta(minutes=1)
     
     return start_time, end_time
 
 
 def get_time_window():
-    """
-    自动计算当前运行的时间窗口。
-    
-    Returns:
-        (start_time, end_time, schedule_index) 北京时间的 datetime 对象
-        schedule_index 为 None 表示手动触发（使用默认时间窗口）
-    """
+    """自动计算当前运行的时间窗口。"""
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
     
     current_hour = now_beijing.hour
     current_minute = now_beijing.minute
     
-    # 找到最接近的运行时间点（允许误差 ±30 分钟）
     matched_schedule = None
     for i, (h, m) in enumerate(SCHEDULE_TIMES):
         schedule_minutes = h * 60 + m
@@ -101,7 +86,6 @@ def get_time_window():
         start_time, end_time = get_time_window_for_schedule(matched_schedule)
         return start_time, end_time, matched_schedule
     else:
-        # 手动触发：抓取最近 4 小时的邮件
         end_time = now_beijing
         start_time = end_time - timedelta(hours=4)
         return start_time, end_time, None
@@ -109,9 +93,9 @@ def get_time_window():
 
 def main():
     """Main entry point for the email digest workflow."""
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Starting email digest...")
+    print(f"[{datetime.now(timezone.utc).isoformat()}] Starting email digest (EPUB + Feishu mode)...")
     
-    # 检查是否指定了时间窗口索引（用于补救触发）
+    # 检查是否指定了时间窗口索引
     schedule_index_str = os.environ.get("SCHEDULE_INDEX", "")
     force_schedule = False
     schedule_index = None
@@ -133,13 +117,17 @@ def main():
     api_key = os.environ.get("AGENTMAIL_API_KEY")
     inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     inbox_id = os.environ.get("AGENTMAIL_INBOX_ID", inbox_email)
-    target_email = os.environ.get("TARGET_EMAIL")
     
-    if not all([api_key, inbox_id, target_email]):
-        print("Error: Missing required environment variables")
-        print(f"  AGENTMAIL_API_KEY: {'set' if api_key else 'MISSING'}")
-        print(f"  AGENTMAIL_INBOX_ID: {'set' if inbox_id else 'MISSING'}")
-        print(f"  TARGET_EMAIL: {'set' if target_email else 'MISSING'}")
+    # Feishu configuration
+    feishu_folder_token = os.environ.get("FEISHU_FOLDER_TOKEN", "")
+    feishu_user_open_id = os.environ.get("FEISHU_USER_OPEN_ID", "")
+    
+    if not api_key:
+        print("Error: AGENTMAIL_API_KEY environment variable is required")
+        sys.exit(1)
+    
+    if not os.environ.get("FEISHU_APP_ID") or not os.environ.get("FEISHU_APP_SECRET"):
+        print("Error: FEISHU_APP_ID and FEISHU_APP_SECRET environment variables are required")
         sys.exit(1)
     
     # 计算时间窗口
@@ -212,7 +200,10 @@ def main():
         print("No new emails to process. Exiting.")
         return
     
-    # Process each email and send individually
+    # Process each email: fetch content + translate
+    translated_emails = []
+    failed_ids = []
+    
     for msg in new_emails:
         msg_id = msg.get("message_id") or msg.get("id")
         print(f"\n{'='*60}")
@@ -224,6 +215,7 @@ def main():
             content = get_message_content(api_key, inbox_id, msg_id)
             translated = translate_email(content)
             
+            # Add message metadata
             sender = msg.get("from", {})
             if isinstance(sender, dict):
                 sender_name = sender.get("name", "") or sender.get("email", "").split('@')[0]
@@ -232,29 +224,98 @@ def main():
             
             article_title = msg.get("subject", "无主题")
             
-            # 去除 Blogtrottr 等 RSS 转发服务的前缀（如 "Blogtrottr - " 或 "Blogtrottr: "）
+            # 去除 Blogtrottr 等 RSS 转发服务的前缀
             SENDER_PREFIX_RE = re.compile(r'^Blogtrottr(\s*[-–—:]\s*)?', re.IGNORECASE)
             sender_name = SENDER_PREFIX_RE.sub('', sender_name).strip()
             article_title = SENDER_PREFIX_RE.sub('', article_title).strip()
             
-            # 如果 sender_name 为空，直接用 article_title
-            email_subject = f"{sender_name} - {article_title}" if sender_name else article_title
+            # Store original subject and sender for EPUB metadata
+            translated['original_sender'] = sender_name
+            if 'original_subject' not in translated:
+                translated['original_subject'] = article_title
             
-            print(f"\n发送邮件: {email_subject}")
-            send_single_email(target_email, translated, email_subject)
-            print(f"✅ 邮件发送成功")
+            # Add timestamp
+            timestamp = msg.get("timestamp", "") or msg.get("received_at", "") or msg.get("created_at", "")
+            if timestamp and 'original_time' not in translated:
+                translated['original_time'] = timestamp
             
-            processed_ids.add(msg_id)
+            translated_emails.append(translated)
+            print(f"  ✅ 翻译完成")
             
         except Exception as e:
             error_msg = f"Error processing {msg_id}: {str(e)}"
-            print(f"❌ {error_msg}")
-            processed_ids.add(msg_id)
+            print(f"  ❌ {error_msg}")
+            # Create a failed entry so we still record it in EPUB
+            translated_emails.append({
+                'translated_subject': msg.get('subject', '无主题'),
+                'original_subject': msg.get('subject', '无主题'),
+                'translated_body': f'[翻译失败: {str(e)[:200]}]',
+                'author': '',
+                'original_time': msg.get("timestamp", ""),
+                'success': False,
+                'models_used': 'none',
+                'english_word_count': 0,
+                'chinese_char_count': 0,
+            })
+            failed_ids.append(msg_id)
+    
+    # Generate EPUB
+    print(f"\n{'='*60}")
+    print(f"生成 EPUB 文件...")
+    
+    try:
+        epub_path = generate_epub(
+            translated_emails=translated_emails,
+            schedule_label=schedule_label
+        )
+        print(f"✅ EPUB 生成成功: {epub_path}")
+    except Exception as e:
+        print(f"❌ EPUB 生成失败: {e}")
+        # EPUB 生成失败，不标记任何邮件为已处理，下次重试
+        sys.exit(1)
+    
+    # Upload to Feishu Drive and send notification
+    print(f"\n上传到飞书云盘...")
+    
+    beijing_tz = timezone(timedelta(hours=8))
+    now_beijing = datetime.now(beijing_tz)
+    
+    epub_info = {
+        "article_count": len(translated_emails),
+        "date": now_beijing.strftime('%Y-%m-%d'),
+        "time": now_beijing.strftime('%H:%M'),
+        "schedule_label": schedule_label,
+    }
+    
+    try:
+        upload_result = upload_and_notify(
+            epub_path=epub_path,
+            feishu_folder_token=feishu_folder_token,
+            feishu_user_open_id=feishu_user_open_id,
+            epub_info=epub_info
+        )
+        print(f"✅ 上传飞书成功")
+    except Exception as e:
+        print(f"❌ 上传飞书失败: {e}")
+        # 上传失败，不标记邮件为已处理，下次重试
+        # 但 EPUB 文件已生成，可以后续手动上传
+        print(f"⚠️ EPUB 文件已保存在本地: {epub_path}")
+        print(f"⚠️ 邮件未标记为已处理，下次运行将重试")
+        sys.exit(1)
+    
+    # Only mark emails as processed AFTER successful EPUB generation AND upload
+    print(f"\n标记邮件为已处理...")
+    for msg in new_emails:
+        msg_id = msg.get("message_id") or msg.get("id")
+        processed_ids.add(msg_id)
     
     save_processed_ids(processed_ids)
-    print(f"\n{'='*60}")
     print(f"保存 {len(processed_ids)} 个已处理邮件 ID")
-    print("完成！")
+    
+    success_count = len(translated_emails) - len(failed_ids)
+    print(f"\n{'='*60}")
+    print(f"完成！成功: {success_count}, 失败: {len(failed_ids)}, 总计: {len(new_emails)}")
+    print(f"EPUB: {epub_path}")
 
 
 if __name__ == "__main__":
