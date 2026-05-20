@@ -12,9 +12,8 @@ from typing import Set, Optional
 from config import PROCESSED_IDS_FILE
 
 
-# 时间窗口过期阈值：保留最近 30 天（720 小时）
-# 之前是 24 小时，导致超过 24 小时的邮件 ID 被清除后可能重复处理
-PROCESSED_IDS_TTL_HOURS = 720
+# 时间窗口过期阈值：保留最近 3 天（72 小时）
+PROCESSED_IDS_TTL_HOURS = 72
 
 def _is_expired(timestamp_str: str) -> bool:
     """检查时间戳是否已过期（超过 TTL）。"""
