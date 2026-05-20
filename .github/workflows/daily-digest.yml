@@ -16,6 +16,9 @@ on:
         default: ''
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   digest:
     runs-on: ubuntu-latest
