@@ -6,7 +6,11 @@
 2. 通过飞书机器人发送 EPUB 文件消息
 3. 通过飞书机器人发送卡片消息通知用户
 
-修复：processed_emails.json 仅在 EPUB 生成成功后才标记邮件为已处理
+修复：
+- processed_emails.json 仅在 EPUB 生成成功后才标记邮件为已处理
+- processed_ids TTL 从 24 小时改为 30 天（防止邮件重复处理）
+- 手动触发使用 last_run_time 作为时间窗口起点（而非固定 24 小时）
+- 每次成功运行后保存 last_run_time
 """
 
 import os
@@ -23,7 +27,7 @@ from fetch_emails import fetch_recent_emails, get_message_content
 from summarize import translate_email
 from epub_generator import generate_epub
 from feishu_upload import upload_and_notify
-from utils import load_processed_ids, save_processed_ids
+from utils import load_processed_ids, save_processed_ids, load_last_run_time, save_last_run_time
 
 
 # 运行时间点配置（北京时间）
@@ -41,8 +45,8 @@ def get_time_window_for_schedule(schedule_index):
     """
     根据时间窗口索引计算时间窗口。
     
-    自动处理跨日补救：如果时间点在当前时间之后，说明是跨日补救，
-    自动回退到前一天。
+    自动处理跨日补救：如果时间点在当前时间之前，说明是跨日补救，
+    使用当天的时间点；如果时间点在当前时间之后，说明是补昨天的。
     """
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
@@ -52,6 +56,7 @@ def get_time_window_for_schedule(schedule_index):
     end_time = now_beijing.replace(hour=schedule_hour, minute=schedule_minute, second=0, microsecond=0)
     
     if end_time > now_beijing:
+        # 时间点还未到达，说明是补昨天的
         end_time -= timedelta(days=1)
     
     if schedule_index == 0:
@@ -67,8 +72,8 @@ def get_time_window_for_schedule(schedule_index):
 def get_time_window():
     """自动计算当前运行的时间窗口。
     
-    仅在 cron 触发时匹配 schedule 时间点。
-    手动触发（workflow_dispatch）使用最近24小时窗口。
+    Cron 触发：匹配最近的 schedule 时间点，使用固定窗口。
+    手动触发：使用 last_run_time 作为窗口起点，确保不重复抓取。
     """
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
@@ -95,9 +100,19 @@ def get_time_window():
             start_time, end_time = get_time_window_for_schedule(matched_schedule)
             return start_time, end_time, matched_schedule
     
-    # 手动触发或未匹配：使用最近24小时窗口
+    # 手动触发或未匹配：使用 last_run_time 作为起点
     end_time = now_beijing
-    start_time = end_time - timedelta(hours=24)
+    last_run = load_last_run_time()
+    
+    if last_run:
+        # 从上次成功运行时间开始
+        start_time = last_run.astimezone(beijing_tz)
+        print(f"手动触发模式：从上次运行时间 {start_time.strftime('%Y-%m-%d %H:%M')} 开始抓取")
+    else:
+        # 无上次运行记录，默认抓取最近 4 小时
+        start_time = end_time - timedelta(hours=4)
+        print("手动触发模式：无上次运行记录，抓取最近 4 小时的邮件")
+    
     return start_time, end_time, None
 
 
@@ -149,7 +164,6 @@ def main():
             schedule_label = f"时间点 {matched_schedule}"
         else:
             schedule_label = "手动触发模式"
-            print("手动触发模式：抓取最近 4 小时的邮件")
     
     print(f"\n时间窗口: {start_time.strftime('%Y-%m-%d %H:%M')} ~ {end_time.strftime('%Y-%m-%d %H:%M')} (北京时间)")
     
@@ -207,6 +221,8 @@ def main():
     
     if not new_emails:
         print("No new emails to process. Exiting.")
+        # 即使没有新邮件，也记录运行时间，以便下次手动触发能正确计算窗口
+        save_last_run_time()
         return
     
     # Process each email: fetch content + translate
@@ -318,7 +334,12 @@ def main():
         processed_ids.add(msg_id)
     
     save_processed_ids(processed_ids)
+    
+    # 记录本次运行时间，确保下次手动触发能正确计算时间窗口
+    save_last_run_time()
+    
     print(f"保存 {len(processed_ids)} 个已处理邮件 ID")
+    print(f"已记录运行时间: {datetime.now(timezone.utc).isoformat()}")
     
     success_count = len(translated_emails) - len(failed_ids)
     print(f"\n{'='*60}")
