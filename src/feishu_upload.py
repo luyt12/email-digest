@@ -3,11 +3,11 @@
 
 Uses Feishu Open API to:
 1. Get tenant_access_token
-2. Upload file via im/v1/images (or drive/v1/files)
-3. Send message to user via bot
+2. Upload file via im/v1/files
+3. Send file message to user via bot
+4. Send text notification with article list
 
-For file upload, we use the im/v1/files API which supports
-sending files as messages via the bot.
+Updated: Use FEISHU_RECEIVE_ID (consistent with journal-weekly-delivery)
 """
 
 import os
@@ -122,18 +122,18 @@ def send_file_message(
     return result
 
 
-def send_card_message(
+def send_text_message(
     token: str,
     receive_id: str,
-    epub_info: dict,
+    text: str,
     receive_id_type: str = "open_id"
 ) -> dict:
-    """Send a notification card message via Feishu bot.
+    """Send a plain text message via Feishu bot.
     
     Args:
         token: tenant_access_token
         receive_id: User open_id or chat_id
-        epub_info: Dict with article_count, date, time, schedule_label
+        text: Text content to send
         receive_id_type: "open_id" or "chat_id"
     """
     url = "https://open.feishu.cn/open-apis/im/v1/messages"
@@ -142,48 +142,12 @@ def send_card_message(
         "Content-Type": "application/json; charset=utf-8"
     }
     
-    article_count = epub_info.get("article_count", 0)
-    date_str = epub_info.get("date", "")
-    time_str = epub_info.get("time", "")
-    schedule_label = epub_info.get("schedule_label", "")
-    
-    schedule_line = f'<div style="font-size:12px;color:#999;">时段: {schedule_label}</div>' if schedule_label else ''
-    
-    msg_content = {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {
-                "tag": "plain_text",
-                "content": "📰 邮件摘要已生成"
-            },
-            "template": "blue"
-        },
-        "elements": [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"📧 **{date_str} {time_str}**\n共 **{article_count}** 篇文章"
-                }
-            }
-        ]
-    }
-    
-    if schedule_label:
-        msg_content["elements"].append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"时段: {schedule_label}"
-            }
-        })
-    
     params = {"receive_id_type": receive_id_type}
     
     data = {
         "receive_id": receive_id,
-        "msg_type": "interactive",
-        "content": json.dumps(msg_content, ensure_ascii=False)
+        "msg_type": "text",
+        "content": json.dumps({"text": text}, ensure_ascii=False)
     }
     
     resp = requests.post(url, headers=headers, params=params, json=data, timeout=30)
@@ -191,17 +155,18 @@ def send_card_message(
     result = resp.json()
     
     if result.get("code") != 0:
-        print(f"Warning: Failed to send card message: {result}")
+        print(f"Warning: Failed to send text message: {result}")
     else:
-        print(f"Card message sent to {receive_id_type}={receive_id}")
+        print(f"Text message sent to {receive_id_type}={receive_id}")
     
     return result
 
 
 def upload_and_notify(
     epub_path: str,
-    feishu_user_open_id: str = "",
-    epub_info: dict = None
+    feishu_receive_id: str = "",
+    epub_info: dict = None,
+    translated_emails: list = None
 ) -> dict:
     """Full pipeline: upload EPUB and send notification via Feishu bot.
     
@@ -211,8 +176,9 @@ def upload_and_notify(
     
     Args:
         epub_path: Local path to EPUB file
-        feishu_user_open_id: User open_id to send notification to
+        feishu_receive_id: User open_id to send notification to
         epub_info: Dict with article_count, date, time, schedule_label
+        translated_emails: List of translated email dicts (for article list)
     
     Returns:
         Dict with upload and notification results
@@ -231,26 +197,43 @@ def upload_and_notify(
     
     # Step 3: Send file message to user
     file_msg_result = None
-    if feishu_user_open_id:
+    if feishu_receive_id:
         file_msg_result = send_file_message(
             token=token,
-            receive_id=feishu_user_open_id,
+            receive_id=feishu_receive_id,
             file_key=file_key
         )
     
-    # Step 4: Send card notification
-    card_result = None
-    if feishu_user_open_id and epub_info:
-        card_result = send_card_message(
+    # Step 4: Send text notification with article list
+    text_result = None
+    if feishu_receive_id and epub_info:
+        article_count = epub_info.get("article_count", 0)
+        date_str = epub_info.get("date", "")
+        time_str = epub_info.get("time", "")
+        
+        # Build article list text
+        lines = [f"📰 邮件摘要 {date_str} {time_str}，共 {article_count} 篇文章"]
+        
+        if translated_emails:
+            for idx, email in enumerate(translated_emails, 1):
+                subject = email.get('translated_subject') or email.get('original_subject', '无标题')
+                author = email.get('author', '')
+                if author:
+                    lines.append(f"{idx}. {subject}（{author}）")
+                else:
+                    lines.append(f"{idx}. {subject}")
+        
+        text_content = "\n".join(lines)
+        text_result = send_text_message(
             token=token,
-            receive_id=feishu_user_open_id,
-            epub_info=epub_info
+            receive_id=feishu_receive_id,
+            text=text_content
         )
     
     return {
         "file_key": file_key,
         "file_message": file_msg_result,
-        "card_message": card_result
+        "text_message": text_result
     }
 
 
@@ -258,15 +241,15 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python feishu_upload.py <epub_path> [user_open_id]")
+        print("Usage: python feishu_upload.py <epub_path> [receive_id]")
         sys.exit(1)
     
     epub_file = sys.argv[1]
-    user_id = sys.argv[2] if len(sys.argv) > 2 else ""
+    receive_id = sys.argv[2] if len(sys.argv) > 2 else ""
     
     result = upload_and_notify(
         epub_path=epub_file,
-        feishu_user_open_id=user_id,
+        feishu_receive_id=receive_id,
         epub_info={"article_count": 0, "date": "test", "time": "test"}
     )
     
