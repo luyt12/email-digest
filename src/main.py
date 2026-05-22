@@ -4,7 +4,7 @@
 重构版：不再通过 SMTP 发送邮件，改为：
 1. 抓取邮件 → 翻译 → 生成 EPUB 文件
 2. 通过飞书机器人发送 EPUB 文件消息
-3. 通过飞书机器人发送卡片消息通知用户
+3. 通过飞书机器人发送文章列表文本通知
 
 修复：
 - processed_emails.json 仅在 EPUB 生成成功后才标记邮件为已处理
@@ -143,8 +143,8 @@ def main():
     inbox_email = os.environ.get("AGENTMAIL_INBOX_EMAIL", "excitedsilver931@agentmail.to")
     inbox_id = os.environ.get("AGENTMAIL_INBOX_ID", inbox_email)
     
-    # Feishu configuration
-    feishu_user_open_id = os.environ.get("FEISHU_USER_OPEN_ID", "")
+    # Feishu configuration (FEISHU_RECEIVE_ID for consistency with journal-weekly-delivery)
+    feishu_receive_id = os.environ.get("FEISHU_RECEIVE_ID", "")
     
     if not api_key:
         print("Error: AGENTMAIL_API_KEY environment variable is required")
@@ -315,8 +315,9 @@ def main():
     try:
         upload_result = upload_and_notify(
             epub_path=epub_path,
-            feishu_user_open_id=feishu_user_open_id,
-            epub_info=epub_info
+            feishu_receive_id=feishu_receive_id,
+            epub_info=epub_info,
+            translated_emails=translated_emails
         )
         print(f"✅ 上传飞书成功")
     except Exception as e:
