@@ -195,11 +195,14 @@ def upload_and_notify(
     Returns:
         Dict with upload and notification results
     """
-    app_id = os.environ.get("FEISHU_APP_ID", "")
-    app_secret = os.environ.get("FEISHU_APP_SECRET", "")
+    app_id = os.environ.get("FEISHU_APP_ID", "").strip()
+    app_secret = os.environ.get("FEISHU_APP_SECRET", "").strip()
     
     if not app_id or not app_secret:
         raise RuntimeError("FEISHU_APP_ID and FEISHU_APP_SECRET environment variables are required")
+    
+    # Strip BOM from feishu_receive_id (UTF-8 BOM = \ufeff)
+    feishu_receive_id = feishu_receive_id.strip().lstrip("\ufeff").lstrip("\ufffe")
     
     # Step 1: Get access token
     token = get_tenant_access_token(app_id, app_secret)
