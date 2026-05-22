@@ -112,8 +112,17 @@ def send_file_message(
     }
     
     resp = requests.post(url, headers=headers, params=params, json=data, timeout=30)
-    resp.raise_for_status()
-    result = resp.json()
+    
+    # Log full response for debugging
+    try:
+        result = resp.json()
+    except:
+        print(f"Failed to parse response as JSON: {resp.text}")
+        resp.raise_for_status()
+    
+    if resp.status_code >= 400:
+        print(f"Feishu API error: HTTP {resp.status_code} - {result}")
+        resp.raise_for_status()
     
     if result.get("code") != 0:
         raise RuntimeError(f"Failed to send file message: {result}")
@@ -151,8 +160,17 @@ def send_text_message(
     }
     
     resp = requests.post(url, headers=headers, params=params, json=data, timeout=30)
-    resp.raise_for_status()
-    result = resp.json()
+    
+    # Log full response for debugging
+    try:
+        result = resp.json()
+    except:
+        print(f"Failed to parse response as JSON: {resp.text}")
+        resp.raise_for_status()
+    
+    if resp.status_code >= 400:
+        print(f"Feishu API error: HTTP {resp.status_code} - {result}")
+        resp.raise_for_status()
     
     if result.get("code") != 0:
         print(f"Warning: Failed to send text message: {result}")
@@ -198,11 +216,14 @@ def upload_and_notify(
     # Step 3: Send file message to user
     file_msg_result = None
     if feishu_receive_id:
+        print(f"Sending file message to receive_id: {feishu_receive_id[:10]}...")
         file_msg_result = send_file_message(
             token=token,
             receive_id=feishu_receive_id,
             file_key=file_key
         )
+    else:
+        print("Warning: feishu_receive_id is empty, skipping file message")
     
     # Step 4: Send text notification with article list
     text_result = None
