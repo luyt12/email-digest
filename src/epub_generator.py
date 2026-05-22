@@ -6,13 +6,15 @@ Uses EbookLib to create a well-formatted EPUB file with:
 - Individual chapters per article
 - Author and metadata
 - CSS styling
+- Image embedding from media_urls
 """
 
 import os
 import re
 import uuid
+import requests
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 from ebooklib import epub
 
 
@@ -31,6 +33,47 @@ def _clean_for_epub_id(text: str) -> str:
     cleaned = re.sub(r'[^\w\s-]', '', text)
     cleaned = re.sub(r'[\s-]+', '_', cleaned)
     return cleaned[:50] or 'article'
+
+
+def _download_image(url: str, timeout: int = 30) -> Tuple[Optional[bytes], Optional[str]]:
+    """Download an image from URL.
+    
+    Returns:
+        Tuple of (image_bytes, content_type) or (None, None) on failure
+    """
+    try:
+        resp = requests.get(url, timeout=timeout, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        resp.raise_for_status()
+        content_type = resp.headers.get('Content-Type', 'image/jpeg')
+        # Validate it's actually an image
+        if not content_type.startswith('image/'):
+            print(f"    ⚠ Not an image ({content_type}), skipping: {url[:80]}")
+            return None, None
+        # Size limit: 5MB
+        if len(resp.content) > 5 * 1024 * 1024:
+            print(f"    ⚠ Image too large ({len(resp.content)} bytes), skipping: {url[:80]}")
+            return None, None
+        return resp.content, content_type
+    except Exception as e:
+        print(f"    ⚠ Failed to download image: {url[:80]} - {str(e)[:60]}")
+        return None, None
+
+
+def _get_image_extension(content_type: str) -> str:
+    """Get file extension from content type."""
+    ext_map = {
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/png': 'png',
+        'image/gif': 'gif',
+        'image/webp': 'webp',
+        'image/svg+xml': 'svg',
+        'image/bmp': 'bmp',
+        'image/tiff': 'tiff',
+    }
+    return ext_map.get(content_type, 'jpg')
 
 
 def generate_epub(
@@ -115,6 +158,16 @@ h2 {
     margin: 0.5em 0;
     text-indent: 2em;
 }
+.content img {
+    display: block;
+    max-width: 100%;
+    margin: 1em auto;
+    border-radius: 4px;
+}
+.image-container {
+    text-align: center;
+    margin: 1em 0;
+}
 .fail {
     color: #c0392b;
     font-style: italic;
@@ -166,6 +219,9 @@ h2 {
     cover_chapter.content = cover_content
     cover_chapter.add_item(nav_css)
     book.add_item(cover_chapter)
+    
+    # Track total images downloaded
+    total_images = 0
     
     # Article chapters
     for i, email in enumerate(translated_emails):
@@ -222,13 +278,46 @@ h2 {
         if not success:
             body_html = f'<p class="fail">⚠️ 翻译失败</p>\n{body_html}'
         
-        # Build chapter HTML
+        # Download and embed images from media_urls
+        media_urls = email.get('media_urls', [])
+        image_html_parts = []
+        
+        if media_urls:
+            print(f"    Processing {len(media_urls)} media URL(s) for article {i+1}")
+        
+        for j, img_url in enumerate(media_urls):
+            img_data, img_type = _download_image(img_url)
+            if img_data:
+                ext = _get_image_extension(img_type)
+                img_filename = f'images/chapter_{i+1}_img_{j+1}.{ext}'
+                img_uid = f'img_{i+1}_{j+1}'
+                
+                img_item = epub.EpubItem(
+                    uid=img_uid,
+                    file_name=img_filename,
+                    media_type=img_type,
+                    content=img_data
+                )
+                book.add_item(img_item)
+                
+                # We'll add img_item to chapter after chapter is created
+                # Store reference for later
+                image_html_parts.append((img_filename, img_item))
+                total_images += 1
+                print(f"    ✓ Image {j+1}/{len(media_urls)} downloaded ({len(img_data)} bytes)")
+        
+        # Build image HTML section
+        image_html = ''
+        for img_filename, _ in image_html_parts:
+            image_html += f'<div class="image-container"><img src="{img_filename}" alt="image"/></div>\n'
+        
+        # Build chapter HTML (images inserted before body text)
         chapter_html = f'''<html><body>
 <h1>{_escape_html(cleaned_title)}</h1>
 {'<h2>' + _escape_html(original_subject) + '</h2>' if original_subject and original_subject != cleaned_title else ''}
 <div class="meta">{' | '.join(meta_items)}</div>
 <div class="content">
-{body_html}
+{image_html}{body_html}
 </div>
 </body></html>'''
         
@@ -243,6 +332,11 @@ h2 {
         )
         chapter.content = chapter_html
         chapter.add_item(nav_css)
+        
+        # Add image items to chapter for proper EPUB reference
+        for _, img_item in image_html_parts:
+            chapter.add_item(img_item)
+        
         book.add_item(chapter)
         chapters.append(chapter)
     
@@ -261,7 +355,8 @@ h2 {
     # Write EPUB
     epub.write_epub(filepath, book, {})
     
-    print(f"EPUB generated: {filepath} ({os.path.getsize(filepath)} bytes)")
+    file_size = os.path.getsize(filepath)
+    print(f"EPUB generated: {filepath} ({file_size} bytes, {total_images} images embedded)")
     return filepath
 
 
@@ -278,6 +373,7 @@ if __name__ == "__main__":
             'models_used': 'minimax-m2.7',
             'english_word_count': 150,
             'chinese_char_count': 80,
+            'media_urls': [],
         },
         {
             'translated_subject': '测试文章 - 地缘政治分析',
@@ -289,6 +385,7 @@ if __name__ == "__main__":
             'models_used': 'qwen3-coder',
             'english_word_count': 100,
             'chinese_char_count': 45,
+            'media_urls': [],
         }
     ]
     
