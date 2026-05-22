@@ -51,8 +51,8 @@ def _download_image(url: str, timeout: int = 30) -> Tuple[Optional[bytes], Optio
         if not content_type.startswith('image/'):
             print(f"    ⚠ Not an image ({content_type}), skipping: {url[:80]}")
             return None, None
-        # Size limit: 5MB
-        if len(resp.content) > 5 * 1024 * 1024:
+        # Size limit: 1MB (Feishu im/v1/files has 30MB total limit)
+        if len(resp.content) > 1 * 1024 * 1024:
             print(f"    ⚠ Image too large ({len(resp.content)} bytes), skipping: {url[:80]}")
             return None, None
         return resp.content, content_type
