@@ -95,14 +95,10 @@ def send_file_message(
         file_key: File key from upload
         receive_id_type: "open_id" or "chat_id"
     """
-    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    url = f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json; charset=utf-8"
-    }
-    
-    params = {
-        "receive_id_type": receive_id_type
+        "Content-Type": "application/json"
     }
     
     data = {
@@ -111,7 +107,7 @@ def send_file_message(
         "content": json.dumps({"file_key": file_key})
     }
     
-    resp = requests.post(url, headers=headers, params=params, json=data, timeout=30)
+    resp = requests.post(url, headers=headers, json=data, timeout=30)
     
     # Log full response for debugging
     try:
@@ -145,13 +141,11 @@ def send_text_message(
         text: Text content to send
         receive_id_type: "open_id" or "chat_id"
     """
-    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    url = f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json; charset=utf-8"
+        "Content-Type": "application/json"
     }
-    
-    params = {"receive_id_type": receive_id_type}
     
     data = {
         "receive_id": receive_id,
@@ -159,7 +153,7 @@ def send_text_message(
         "content": json.dumps({"text": text}, ensure_ascii=False)
     }
     
-    resp = requests.post(url, headers=headers, params=params, json=data, timeout=30)
+    resp = requests.post(url, headers=headers, json=data, timeout=30)
     
     # Log full response for debugging
     try:
