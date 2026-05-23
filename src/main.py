@@ -237,6 +237,8 @@ def main():
     # Process each email: fetch content + translate
     translated_emails = []
     failed_ids = []
+    
+    for msg in new_emails:
         msg_id = msg.get("message_id") or msg.get("id")
         print(f"\n{'='*60}")
         print(f"处理邮件: {msg_id}")
