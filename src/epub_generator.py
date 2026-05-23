@@ -76,6 +76,25 @@ def _get_image_extension(content_type: str) -> str:
     return ext_map.get(content_type, 'jpg')
 
 
+def _find_first_image(translated_emails: List[Dict[str, Any]]) -> Tuple[Optional[bytes], Optional[str]]:
+    """Find and download the first image from articles for use as cover.
+    
+    Returns:
+        Tuple of (image_bytes, content_type) or (None, None) if no suitable image found
+    """
+    for email in translated_emails:
+        media_urls = email.get('media_urls', [])
+        if not media_urls:
+            continue
+        # Try first URL only for cover
+        img_url = media_urls[0]
+        img_data, img_type = _download_image(img_url)
+        if img_data:
+            print(f"    ✓ Using first image as cover: {img_url[:60]}... ({len(img_data)} bytes)")
+            return img_data, img_type
+    return None, None
+
+
 def generate_epub(
     translated_emails: List[Dict[str, Any]],
     schedule_label: str = "",
@@ -93,6 +112,10 @@ def generate_epub(
     """
     beijing_tz = timezone(timedelta(hours=8))
     now_beijing = datetime.now(beijing_tz)
+    
+    # Try to get a cover image from the first available article
+    cover_image_data, cover_image_type = _find_first_image(translated_emails)
+    cover_image_ext = _get_image_extension(cover_image_type) if cover_image_type else 'jpg'
     
     # Determine output directory: epubs/YYYY-MM/
     if output_dir is None:
@@ -121,6 +144,12 @@ def generate_epub(
     book.add_author('Email Digest Bot')
     book.add_metadata('DC', 'description', f'每日邮件摘要 - {date_str}，共 {len(translated_emails)} 篇文章')
     book.add_metadata('DC', 'date', now_beijing.strftime('%Y-%m-%d'))
+    
+    # Set cover image if available
+    if cover_image_data:
+        cover_filename = f'images/cover.{cover_image_ext}'
+        book.set_cover(cover_filename, cover_image_data, create_page=False)
+        print(f"    Cover image set: {cover_filename} ({len(cover_image_data)} bytes)")
     
     # CSS styling
     style = '''
@@ -200,8 +229,10 @@ h2 {
     chapters = []
     
     # Cover page / Introduction
+    cover_img_html = f'<img src="images/cover.{cover_image_ext}" alt="cover" style="max-width:100%;max-height:60vh;object-fit:contain;margin-bottom:2em;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);"/>' if cover_image_data else ''
     cover_content = f'''<html><body>
 <div class="cover-page">
+{cover_img_html}
 <h1>📰 邮件摘要</h1>
 <div class="info">
 <p>{_escape_html(date_str)} {now_beijing.strftime('%H:%M')} 北京时间</p>
