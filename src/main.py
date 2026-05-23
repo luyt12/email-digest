@@ -30,6 +30,9 @@ from feishu_upload import upload_and_notify
 from utils import load_processed_ids, save_processed_ids, load_last_run_time, save_last_run_time
 
 
+# 每个 EPUB 最多处理的文章数量（超出则留到后续时间点处理）
+MAX_ARTICLES_PER_EPUB = 15
+
 # 运行时间点配置（北京时间）
 SCHEDULE_TIMES = [
     (4, 40),   # 0: 04:40 - 抓取 0:00 ~ 04:40
@@ -225,11 +228,15 @@ def main():
         save_last_run_time()
         return
     
+    # 限制每次处理的文章数量
+    if len(new_emails) > MAX_ARTICLES_PER_EPUB:
+        print(f"⚠️ 邮件数量 {len(new_emails)} 超过限制 {MAX_ARTICLES_PER_EPUB}，只处理前 {MAX_ARTICLES_PER_EPUB} 封")
+        print(f"   剩余 {len(new_emails) - MAX_ARTICLES_PER_EPUB} 封将在后续时间点处理")
+        new_emails = new_emails[:MAX_ARTICLES_PER_EPUB]
+    
     # Process each email: fetch content + translate
     translated_emails = []
     failed_ids = []
-    
-    for msg in new_emails:
         msg_id = msg.get("message_id") or msg.get("id")
         print(f"\n{'='*60}")
         print(f"处理邮件: {msg_id}")
